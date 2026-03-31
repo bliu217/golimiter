@@ -3,7 +3,7 @@
 Create a distributed rate-limiting service for gRPC calls  
 Create a simulator in Go as a test harness for the service  
 Create a simple UI to call the simulator with custom parameters  
-
+Load test and expose metrics for the service  
 
 ## Learning points
 - Concurrency safety in Go
@@ -24,6 +24,7 @@ Docker - Multiple nodes
 Redis - Shared state + atomic coordination across nodes  
 k6 - Load testing  
 React - Simple UI for simulator  
+Prometheus/Grafana - Metrics + UI  
 
 ## UML
 
