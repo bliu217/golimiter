@@ -6,6 +6,7 @@ Create a simple UI to call the simulator with custom parameters
 Load test and expose metrics for the service  
 
 ## Learning points
+- Practice with gRPC
 - Concurrency safety in Go
   - Performance of goroutines vs threads
 - Rate limiting algorithms
