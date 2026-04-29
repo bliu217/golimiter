@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package limiter.v1;
+
+option go_package = "github.com/bliu217/golimiter/generated/proto/limiter;limiterv1";
+
+service RateLimiter {
+    rpc Allow(AllowRequest) returns (AllowResponse);
+}
+
+message AllowRequest {
+    // The key representing the client or user making the request, which can be used to apply rate limits on a per-client basis.
+    string key = 1;
+    // The resource being accessed, which can be used to apply different rate limits to different resources.
+    string resource = 2;
+    // The cost of the request, which can be used to determine how much of the rate limit to consume.
+    int32 cost = 3;
+}
+
+message AllowResponse {
+    // Indicates whether the request is allowed under the current rate limits.
+    bool allowed = 1;
+    // If the request is not allowed, this field can provide a reason for the denial (e.g., "rate limit exceeded").
+    string reason = 2;
+    // The number of remaining allowed requests for the client or user before hitting the rate limit.
+    int32 remaining = 3;
+    // The time in seconds until the rate limit resets and the client or user can make requests again.
+    int64 reset_time = 4;
+}
