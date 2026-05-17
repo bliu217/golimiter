@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Algorithm int32
+
+const (
+	Algorithm_ALGORITHM_UNSPECIFIED Algorithm = 0
+	Algorithm_TOKEN_BUCKET          Algorithm = 1
+	Algorithm_FIXED_WINDOW          Algorithm = 2
+	Algorithm_SLIDING_WINDOW        Algorithm = 3
+)
+
+// Enum value maps for Algorithm.
+var (
+	Algorithm_name = map[int32]string{
+		0: "ALGORITHM_UNSPECIFIED",
+		1: "TOKEN_BUCKET",
+		2: "FIXED_WINDOW",
+		3: "SLIDING_WINDOW",
+	}
+	Algorithm_value = map[string]int32{
+		"ALGORITHM_UNSPECIFIED": 0,
+		"TOKEN_BUCKET":          1,
+		"FIXED_WINDOW":          2,
+		"SLIDING_WINDOW":        3,
+	}
+)
+
+func (x Algorithm) Enum() *Algorithm {
+	p := new(Algorithm)
+	*p = x
+	return p
+}
+
+func (x Algorithm) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Algorithm) Descriptor() protoreflect.EnumDescriptor {
+	return file_limiter_proto_enumTypes[0].Descriptor()
+}
+
+func (Algorithm) Type() protoreflect.EnumType {
+	return &file_limiter_proto_enumTypes[0]
+}
+
+func (x Algorithm) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Algorithm.Descriptor instead.
+func (Algorithm) EnumDescriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{0}
+}
+
 type AllowRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The key representing the client or user making the request, which can be used to apply rate limits on a per-client basis.
@@ -156,6 +208,400 @@ func (x *AllowResponse) GetResetTime() int64 {
 	return 0
 }
 
+type ConfigureRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Algorithm Algorithm              `protobuf:"varint,1,opt,name=algorithm,proto3,enum=limiter.v1.Algorithm" json:"algorithm,omitempty"`
+	// Types that are valid to be assigned to Config:
+	//
+	//	*ConfigureRequest_TokenBucket
+	//	*ConfigureRequest_FixedWindow
+	//	*ConfigureRequest_SlidingWindow
+	Config        isConfigureRequest_Config `protobuf_oneof:"config"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigureRequest) Reset() {
+	*x = ConfigureRequest{}
+	mi := &file_limiter_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigureRequest) ProtoMessage() {}
+
+func (x *ConfigureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigureRequest.ProtoReflect.Descriptor instead.
+func (*ConfigureRequest) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ConfigureRequest) GetAlgorithm() Algorithm {
+	if x != nil {
+		return x.Algorithm
+	}
+	return Algorithm_ALGORITHM_UNSPECIFIED
+}
+
+func (x *ConfigureRequest) GetConfig() isConfigureRequest_Config {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+func (x *ConfigureRequest) GetTokenBucket() *TokenBucketConfig {
+	if x != nil {
+		if x, ok := x.Config.(*ConfigureRequest_TokenBucket); ok {
+			return x.TokenBucket
+		}
+	}
+	return nil
+}
+
+func (x *ConfigureRequest) GetFixedWindow() *FixedWindowConfig {
+	if x != nil {
+		if x, ok := x.Config.(*ConfigureRequest_FixedWindow); ok {
+			return x.FixedWindow
+		}
+	}
+	return nil
+}
+
+func (x *ConfigureRequest) GetSlidingWindow() *SlidingWindowConfig {
+	if x != nil {
+		if x, ok := x.Config.(*ConfigureRequest_SlidingWindow); ok {
+			return x.SlidingWindow
+		}
+	}
+	return nil
+}
+
+type isConfigureRequest_Config interface {
+	isConfigureRequest_Config()
+}
+
+type ConfigureRequest_TokenBucket struct {
+	TokenBucket *TokenBucketConfig `protobuf:"bytes,2,opt,name=token_bucket,json=tokenBucket,proto3,oneof"`
+}
+
+type ConfigureRequest_FixedWindow struct {
+	FixedWindow *FixedWindowConfig `protobuf:"bytes,3,opt,name=fixed_window,json=fixedWindow,proto3,oneof"`
+}
+
+type ConfigureRequest_SlidingWindow struct {
+	SlidingWindow *SlidingWindowConfig `protobuf:"bytes,4,opt,name=sliding_window,json=slidingWindow,proto3,oneof"`
+}
+
+func (*ConfigureRequest_TokenBucket) isConfigureRequest_Config() {}
+
+func (*ConfigureRequest_FixedWindow) isConfigureRequest_Config() {}
+
+func (*ConfigureRequest_SlidingWindow) isConfigureRequest_Config() {}
+
+type TokenBucketConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Capacity      float64                `protobuf:"fixed64,1,opt,name=capacity,proto3" json:"capacity,omitempty"`
+	RefillRate    float64                `protobuf:"fixed64,2,opt,name=refill_rate,json=refillRate,proto3" json:"refill_rate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TokenBucketConfig) Reset() {
+	*x = TokenBucketConfig{}
+	mi := &file_limiter_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TokenBucketConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TokenBucketConfig) ProtoMessage() {}
+
+func (x *TokenBucketConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TokenBucketConfig.ProtoReflect.Descriptor instead.
+func (*TokenBucketConfig) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *TokenBucketConfig) GetCapacity() float64 {
+	if x != nil {
+		return x.Capacity
+	}
+	return 0
+}
+
+func (x *TokenBucketConfig) GetRefillRate() float64 {
+	if x != nil {
+		return x.RefillRate
+	}
+	return 0
+}
+
+type FixedWindowConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int64                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	WindowSeconds int64                  `protobuf:"varint,2,opt,name=window_seconds,json=windowSeconds,proto3" json:"window_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FixedWindowConfig) Reset() {
+	*x = FixedWindowConfig{}
+	mi := &file_limiter_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FixedWindowConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FixedWindowConfig) ProtoMessage() {}
+
+func (x *FixedWindowConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FixedWindowConfig.ProtoReflect.Descriptor instead.
+func (*FixedWindowConfig) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *FixedWindowConfig) GetLimit() int64 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *FixedWindowConfig) GetWindowSeconds() int64 {
+	if x != nil {
+		return x.WindowSeconds
+	}
+	return 0
+}
+
+type SlidingWindowConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int64                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	WindowSeconds int64                  `protobuf:"varint,2,opt,name=window_seconds,json=windowSeconds,proto3" json:"window_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SlidingWindowConfig) Reset() {
+	*x = SlidingWindowConfig{}
+	mi := &file_limiter_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SlidingWindowConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SlidingWindowConfig) ProtoMessage() {}
+
+func (x *SlidingWindowConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SlidingWindowConfig.ProtoReflect.Descriptor instead.
+func (*SlidingWindowConfig) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SlidingWindowConfig) GetLimit() int64 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *SlidingWindowConfig) GetWindowSeconds() int64 {
+	if x != nil {
+		return x.WindowSeconds
+	}
+	return 0
+}
+
+type ConfigureResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigureResponse) Reset() {
+	*x = ConfigureResponse{}
+	mi := &file_limiter_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigureResponse) ProtoMessage() {}
+
+func (x *ConfigureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigureResponse.ProtoReflect.Descriptor instead.
+func (*ConfigureResponse) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ConfigureResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ConfigureResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type ResetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetRequest) Reset() {
+	*x = ResetRequest{}
+	mi := &file_limiter_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetRequest) ProtoMessage() {}
+
+func (x *ResetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetRequest.ProtoReflect.Descriptor instead.
+func (*ResetRequest) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{7}
+}
+
+type ResetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetResponse) Reset() {
+	*x = ResetResponse{}
+	mi := &file_limiter_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetResponse) ProtoMessage() {}
+
+func (x *ResetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_limiter_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetResponse.ProtoReflect.Descriptor instead.
+func (*ResetResponse) Descriptor() ([]byte, []int) {
+	return file_limiter_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ResetResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
 var File_limiter_proto protoreflect.FileDescriptor
 
 const file_limiter_proto_rawDesc = "" +
@@ -171,9 +617,38 @@ const file_limiter_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1c\n" +
 	"\tremaining\x18\x03 \x01(\x05R\tremaining\x12\x1d\n" +
 	"\n" +
-	"reset_time\x18\x04 \x01(\x03R\tresetTime2K\n" +
+	"reset_time\x18\x04 \x01(\x03R\tresetTime\"\xa3\x02\n" +
+	"\x10ConfigureRequest\x123\n" +
+	"\talgorithm\x18\x01 \x01(\x0e2\x15.limiter.v1.AlgorithmR\talgorithm\x12B\n" +
+	"\ftoken_bucket\x18\x02 \x01(\v2\x1d.limiter.v1.TokenBucketConfigH\x00R\vtokenBucket\x12B\n" +
+	"\ffixed_window\x18\x03 \x01(\v2\x1d.limiter.v1.FixedWindowConfigH\x00R\vfixedWindow\x12H\n" +
+	"\x0esliding_window\x18\x04 \x01(\v2\x1f.limiter.v1.SlidingWindowConfigH\x00R\rslidingWindowB\b\n" +
+	"\x06config\"P\n" +
+	"\x11TokenBucketConfig\x12\x1a\n" +
+	"\bcapacity\x18\x01 \x01(\x01R\bcapacity\x12\x1f\n" +
+	"\vrefill_rate\x18\x02 \x01(\x01R\n" +
+	"refillRate\"P\n" +
+	"\x11FixedWindowConfig\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x03R\x05limit\x12%\n" +
+	"\x0ewindow_seconds\x18\x02 \x01(\x03R\rwindowSeconds\"R\n" +
+	"\x13SlidingWindowConfig\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x03R\x05limit\x12%\n" +
+	"\x0ewindow_seconds\x18\x02 \x01(\x03R\rwindowSeconds\"G\n" +
+	"\x11ConfigureResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x0e\n" +
+	"\fResetRequest\")\n" +
+	"\rResetResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*^\n" +
+	"\tAlgorithm\x12\x19\n" +
+	"\x15ALGORITHM_UNSPECIFIED\x10\x00\x12\x10\n" +
+	"\fTOKEN_BUCKET\x10\x01\x12\x10\n" +
+	"\fFIXED_WINDOW\x10\x02\x12\x12\n" +
+	"\x0eSLIDING_WINDOW\x10\x032\xd3\x01\n" +
 	"\vRateLimiter\x12<\n" +
-	"\x05Allow\x12\x18.limiter.v1.AllowRequest\x1a\x19.limiter.v1.AllowResponseB@Z>github.com/bliu217/golimiter/generated/proto/limiter;limiterv1b\x06proto3"
+	"\x05Allow\x12\x18.limiter.v1.AllowRequest\x1a\x19.limiter.v1.AllowResponse\x12H\n" +
+	"\tConfigure\x12\x1c.limiter.v1.ConfigureRequest\x1a\x1d.limiter.v1.ConfigureResponse\x12<\n" +
+	"\x05Reset\x12\x18.limiter.v1.ResetRequest\x1a\x19.limiter.v1.ResetResponseB@Z>github.com/bliu217/golimiter/generated/proto/limiter;limiterv1b\x06proto3"
 
 var (
 	file_limiter_proto_rawDescOnce sync.Once
@@ -187,19 +662,36 @@ func file_limiter_proto_rawDescGZIP() []byte {
 	return file_limiter_proto_rawDescData
 }
 
-var file_limiter_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_limiter_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_limiter_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_limiter_proto_goTypes = []any{
-	(*AllowRequest)(nil),  // 0: limiter.v1.AllowRequest
-	(*AllowResponse)(nil), // 1: limiter.v1.AllowResponse
+	(Algorithm)(0),              // 0: limiter.v1.Algorithm
+	(*AllowRequest)(nil),        // 1: limiter.v1.AllowRequest
+	(*AllowResponse)(nil),       // 2: limiter.v1.AllowResponse
+	(*ConfigureRequest)(nil),    // 3: limiter.v1.ConfigureRequest
+	(*TokenBucketConfig)(nil),   // 4: limiter.v1.TokenBucketConfig
+	(*FixedWindowConfig)(nil),   // 5: limiter.v1.FixedWindowConfig
+	(*SlidingWindowConfig)(nil), // 6: limiter.v1.SlidingWindowConfig
+	(*ConfigureResponse)(nil),   // 7: limiter.v1.ConfigureResponse
+	(*ResetRequest)(nil),        // 8: limiter.v1.ResetRequest
+	(*ResetResponse)(nil),       // 9: limiter.v1.ResetResponse
 }
 var file_limiter_proto_depIdxs = []int32{
-	0, // 0: limiter.v1.RateLimiter.Allow:input_type -> limiter.v1.AllowRequest
-	1, // 1: limiter.v1.RateLimiter.Allow:output_type -> limiter.v1.AllowResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: limiter.v1.ConfigureRequest.algorithm:type_name -> limiter.v1.Algorithm
+	4, // 1: limiter.v1.ConfigureRequest.token_bucket:type_name -> limiter.v1.TokenBucketConfig
+	5, // 2: limiter.v1.ConfigureRequest.fixed_window:type_name -> limiter.v1.FixedWindowConfig
+	6, // 3: limiter.v1.ConfigureRequest.sliding_window:type_name -> limiter.v1.SlidingWindowConfig
+	1, // 4: limiter.v1.RateLimiter.Allow:input_type -> limiter.v1.AllowRequest
+	3, // 5: limiter.v1.RateLimiter.Configure:input_type -> limiter.v1.ConfigureRequest
+	8, // 6: limiter.v1.RateLimiter.Reset:input_type -> limiter.v1.ResetRequest
+	2, // 7: limiter.v1.RateLimiter.Allow:output_type -> limiter.v1.AllowResponse
+	7, // 8: limiter.v1.RateLimiter.Configure:output_type -> limiter.v1.ConfigureResponse
+	9, // 9: limiter.v1.RateLimiter.Reset:output_type -> limiter.v1.ResetResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_limiter_proto_init() }
@@ -207,18 +699,24 @@ func file_limiter_proto_init() {
 	if File_limiter_proto != nil {
 		return
 	}
+	file_limiter_proto_msgTypes[2].OneofWrappers = []any{
+		(*ConfigureRequest_TokenBucket)(nil),
+		(*ConfigureRequest_FixedWindow)(nil),
+		(*ConfigureRequest_SlidingWindow)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_limiter_proto_rawDesc), len(file_limiter_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      1,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_limiter_proto_goTypes,
 		DependencyIndexes: file_limiter_proto_depIdxs,
+		EnumInfos:         file_limiter_proto_enumTypes,
 		MessageInfos:      file_limiter_proto_msgTypes,
 	}.Build()
 	File_limiter_proto = out.File

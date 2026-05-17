@@ -5,25 +5,70 @@ package limiter.v1;
 option go_package = "github.com/bliu217/golimiter/generated/proto/limiter;limiterv1";
 
 service RateLimiter {
-    rpc Allow(AllowRequest) returns (AllowResponse);
+  rpc Allow(AllowRequest) returns (AllowResponse);
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+  rpc Reset(ResetRequest) returns (ResetResponse);
 }
 
 message AllowRequest {
     // The key representing the client or user making the request, which can be used to apply rate limits on a per-client basis.
-    string key = 1;
+  string key = 1;
     // The resource being accessed, which can be used to apply different rate limits to different resources.
-    string resource = 2;
+  string resource = 2;
     // The cost of the request, which can be used to determine how much of the rate limit to consume.
-    int32 cost = 3;
+  int32 cost = 3;
 }
 
 message AllowResponse {
     // Indicates whether the request is allowed under the current rate limits.
-    bool allowed = 1;
+  bool allowed = 1;
     // If the request is not allowed, this field can provide a reason for the denial (e.g., "rate limit exceeded").
-    string reason = 2;
+  string reason = 2;
     // The number of remaining allowed requests for the client or user before hitting the rate limit.
-    int32 remaining = 3;
+  int32 remaining = 3;
     // The time in seconds until the rate limit resets and the client or user can make requests again.
-    int64 reset_time = 4;
+  int64 reset_time = 4;
+}
+
+enum Algorithm {
+  ALGORITHM_UNSPECIFIED = 0;
+  TOKEN_BUCKET = 1;
+  FIXED_WINDOW = 2;
+  SLIDING_WINDOW = 3;
+}
+
+message ConfigureRequest {
+  Algorithm algorithm = 1;
+
+  oneof config {
+    TokenBucketConfig token_bucket = 2;
+    FixedWindowConfig fixed_window = 3;
+    SlidingWindowConfig sliding_window = 4;
+  }
+}
+
+message TokenBucketConfig {
+  double capacity = 1;
+  double refill_rate = 2;
+}
+
+message FixedWindowConfig {
+  int64 limit = 1;
+  int64 window_seconds = 2;
+}
+
+message SlidingWindowConfig {
+  int64 limit = 1;
+  int64 window_seconds = 2;
+}
+
+message ConfigureResponse {
+  bool   success = 1;
+  string message = 2;
+}
+
+message ResetRequest {}
+
+message ResetResponse {
+  bool success = 1;
 }
