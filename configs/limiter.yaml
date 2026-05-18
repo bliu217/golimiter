@@ -1,0 +1,17 @@
+server:
+  grpc_port: 50051
+
+limiter:
+  algorithm: token_bucket
+
+  token_bucket:
+    capacity: 10
+    refill_rate: 5
+
+  fixed_window:
+    limit: 100
+    window_seconds: 60
+
+  sliding_window:
+    limit: 100
+    window_seconds: 60

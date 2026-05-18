@@ -14,7 +14,7 @@ type RateLimiterServer struct {
 	mu      sync.Mutex
 }
 
-func NewRateLimitServer(l limiter.Limiter) *RateLimiterServer {
+func NewRateLimiterServer(l limiter.Limiter) *RateLimiterServer {
 	return &RateLimiterServer{
 		limiter: l,
 		mu:      sync.Mutex{},
