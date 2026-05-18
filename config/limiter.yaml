@@ -1,6 +1,18 @@
 server:
   grpc_port: 50051
 
+storage: memory
+
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+  key_prefix: golimiter
+  dial_timeout_ms: 500
+  read_timeout_ms: 200
+  write_timeout_ms: 200
+  pool_size: 50
+
 limiter:
   algorithm: token_bucket
 

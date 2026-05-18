@@ -11,12 +11,14 @@ import (
 type RateLimiterServer struct {
 	pb.UnimplementedRateLimiterServer
 	limiter limiter.Limiter
+	deps    limiter.Deps
 	mu      sync.Mutex
 }
 
-func NewRateLimiterServer(l limiter.Limiter) *RateLimiterServer {
+func NewRateLimiterServer(l limiter.Limiter, deps limiter.Deps) *RateLimiterServer {
 	return &RateLimiterServer{
 		limiter: l,
+		deps:    deps,
 		mu:      sync.Mutex{},
 	}
 }
@@ -25,7 +27,7 @@ func (s *RateLimiterServer) Configure(
 	ctx context.Context,
 	req *pb.ConfigureRequest,
 ) (*pb.ConfigureResponse, error) {
-	l, err := limiter.NewLimiterFromConfig(req)
+	l, err := limiter.NewLimiterFromConfigWithDeps(req, s.deps)
 	if err != nil {
 		return &pb.ConfigureResponse{
 			Success: false,

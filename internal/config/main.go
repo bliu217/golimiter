@@ -11,7 +11,20 @@ type Config struct {
 		GRPCPort int `yaml:"grpc_port"`
 	} `yaml:"server"`
 
+	Storage string        `yaml:"storage"`
+	Redis   RedisConfig   `yaml:"redis"`
 	Limiter LimiterConfig `yaml:"limiter"`
+}
+
+type RedisConfig struct {
+	Addr           string `yaml:"addr"`
+	Password       string `yaml:"password"`
+	DB             int    `yaml:"db"`
+	KeyPrefix      string `yaml:"key_prefix"`
+	DialTimeoutMS  int    `yaml:"dial_timeout_ms"`
+	ReadTimeoutMS  int    `yaml:"read_timeout_ms"`
+	WriteTimeoutMS int    `yaml:"write_timeout_ms"`
+	PoolSize       int    `yaml:"pool_size"`
 }
 
 type LimiterConfig struct {

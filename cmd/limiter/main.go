@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
+	"strings"
+	"time"
 
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 
 	pb "github.com/bliu217/golimiter/generated/proto/limiter"
@@ -19,12 +23,41 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	l, err := limiter.NewLimiterFromYAMLConfig(cfg.Limiter)
+	var deps limiter.Deps
+	if strings.EqualFold(strings.TrimSpace(cfg.Storage), "redis") {
+		redisAddr := cfg.Redis.Addr
+		if strings.TrimSpace(redisAddr) == "" {
+			redisAddr = "localhost:6379"
+		}
+
+		rdb := redis.NewClient(&redis.Options{
+			Addr:         redisAddr,
+			Password:     cfg.Redis.Password,
+			DB:           cfg.Redis.DB,
+			DialTimeout:  time.Duration(cfg.Redis.DialTimeoutMS) * time.Millisecond,
+			ReadTimeout:  time.Duration(cfg.Redis.ReadTimeoutMS) * time.Millisecond,
+			WriteTimeout: time.Duration(cfg.Redis.WriteTimeoutMS) * time.Millisecond,
+			PoolSize:     cfg.Redis.PoolSize,
+		})
+		if err := rdb.Ping(context.Background()).Err(); err != nil {
+			log.Fatalf("failed to connect to redis at %s: %v", redisAddr, err)
+		}
+		defer func() {
+			_ = rdb.Close()
+		}()
+
+		deps = limiter.Deps{
+			RedisClient:    rdb,
+			RedisKeyPrefix: cfg.Redis.KeyPrefix,
+		}
+	}
+
+	l, err := limiter.NewLimiterFromYAMLConfig(cfg, deps)
 	if err != nil {
 		log.Fatalf("failed to create limiter: %v", err)
 	}
 
-	handler := grpcServer.NewRateLimiterServer(l)
+	handler := grpcServer.NewRateLimiterServer(l, deps)
 
 	server := grpc.NewServer()
 	pb.RegisterRateLimiterServer(server, handler)

@@ -5,3 +5,9 @@ gen:
 		--go_opt=paths=source_relative \
 		--go-grpc_out=generated/proto/limiter \
 		--go-grpc_opt=paths=source_relative
+
+test-unit:
+	@cd .. && go test ./...
+
+test-integration:
+	@cd .. && go test -tags=integration ./...

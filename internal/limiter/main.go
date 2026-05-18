@@ -1,22 +1,39 @@
 package limiter
 
 import (
-	// "time"
-
 	"errors"
+	"strings"
 
 	pb "github.com/bliu217/golimiter/generated/proto/limiter"
 	"github.com/bliu217/golimiter/internal/config"
+	"github.com/redis/go-redis/v9"
 )
 
 type Limiter interface {
 	Allow(key string, cost float64) (bool, error)
 }
 
+type Deps struct {
+	RedisClient    redis.Scripter
+	RedisKeyPrefix string
+}
+
 func NewLimiterFromConfig(req *pb.ConfigureRequest) (Limiter, error) {
+	return NewLimiterFromConfigWithDeps(req, Deps{})
+}
+
+func NewLimiterFromConfigWithDeps(req *pb.ConfigureRequest, deps Deps) (Limiter, error) {
 	switch req.Algorithm {
 	case pb.Algorithm_TOKEN_BUCKET:
 		cfg := req.GetTokenBucket()
+		if deps.RedisClient != nil {
+			return NewRedisTokenBucketLimiter(
+				deps.RedisClient,
+				cfg.Capacity,
+				cfg.RefillRate,
+				deps.RedisKeyPrefix,
+			)
+		}
 		return NewInMemoryTokenBucketLimiter(cfg.Capacity, cfg.RefillRate)
 
 	// case pb.Algorithm_FIXED_WINDOW:
@@ -32,14 +49,36 @@ func NewLimiterFromConfig(req *pb.ConfigureRequest) (Limiter, error) {
 	}
 }
 
-func NewLimiterFromYAMLConfig(cfg config.LimiterConfig) (Limiter, error) {
+func NewLimiterFromYAMLConfig(cfg *config.Config, deps Deps) (Limiter, error) {
+	storage := strings.ToLower(strings.TrimSpace(cfg.Storage))
+	if storage == "" {
+		storage = "memory"
+	}
+
+	switch storage {
+	case "memory":
+		return newLimiterFromAlgorithm(cfg.Limiter)
+	case "redis":
+		switch cfg.Limiter.Algorithm {
+		case "token_bucket":
+			return NewRedisTokenBucketLimiter(
+				deps.RedisClient,
+				cfg.Limiter.TokenBucket.Capacity,
+				cfg.Limiter.TokenBucket.RefillRate,
+				cfg.Redis.KeyPrefix,
+			)
+		default:
+			return nil, errors.New("unsupported limiter algorithm: " + cfg.Limiter.Algorithm)
+		}
+	default:
+		return nil, errors.New("unsupported limiter storage: " + cfg.Storage)
+	}
+}
+
+func newLimiterFromAlgorithm(cfg config.LimiterConfig) (Limiter, error) {
 	switch cfg.Algorithm {
 	case "token_bucket":
-		return NewInMemoryTokenBucketLimiter(
-			cfg.TokenBucket.Capacity,
-			cfg.TokenBucket.RefillRate,
-		)
-
+		return NewInMemoryTokenBucketLimiter(cfg.TokenBucket.Capacity, cfg.TokenBucket.RefillRate)
 	// case "fixed_window":
 	// 	return NewFixedWindowLimiter(
 	// 		cfg.FixedWindow.Limit,
