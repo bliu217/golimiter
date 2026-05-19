@@ -1,6 +1,8 @@
 # Overview
 ## Purpose
-Create a distributed rate-limiting service for gRPC calls  
+Create a rate-limiting gRPC service for endpoint requests  
+Create a shared state to prepare for the deployment of multiple service nodes  
+Containerize, monitor, and deploy with Docker + AWS services  
 Create a simulator in Go as a test harness for the service  
 Create a simple UI to call the simulator with custom parameters  
 Load test and expose metrics for the service  
@@ -18,14 +20,17 @@ Load test and expose metrics for the service
 - Fallback for Redis downtime
 # Architecture 
   
-## Tech Stack
+## Application Layer Tech Stack
 Go - Simulator Client, gRPC Service  
-NGINX - Load Balancer  
 Docker - Multiple nodes  
 Redis - Shared state + atomic coordination across nodes  
-k6 - Load testing  
+k6 (TBD) - Load testing  
 React - Simple UI for simulator  
 Prometheus/Grafana - Metrics + UI  
+
+## AWS Deployment
+Clients -> Application Load Balancer -> ECS and ECR -> ElastiCache  
+CloudWatch to collect logs/metrics, AppConfig to centralize rate-limiter algorithm selection  
 
 ## Distributed State (Redis)
 - Atomic Lua scripting (`EVAL` / `EVALSHA` / `SCRIPT LOAD`) keeps refill, limit check, and token decrement in one server-side transaction so concurrent nodes cannot oversubscribe a bucket.
