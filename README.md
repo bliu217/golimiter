@@ -42,6 +42,26 @@ CloudWatch to collect logs/metrics, AppConfig to centralize rate-limiter algorit
 - Failure behavior is currently deny-by-default when Redis is unavailable (errors bubble up); fail-open or fallback modes are tracked as separate follow-up work.
 - Cross-node consistency is strong per key because all bucket updates serialize through the same Redis primary.
 
+## Simulator
+The simulator is a Go CLI test harness for the gRPC rate limiter. It sends
+configurable `Allow` requests to a running limiter service so you can quickly
+exercise in-memory or Redis-backed token bucket behavior during local
+development.
+
+The CLI can vary request count, concurrency, key cardinality, resource, cost,
+per-RPC timeout, and whether to reset limiter state before a run. Its summary
+reports allowed, denied, and error totals along with throughput, latency, and
+the latest `remaining` / `reset_time` metadata returned by the service.
+
+Example:
+
+```sh
+go run ./cmd/sim -addr localhost:50051 -requests 100 -concurrency 10 -keys 5 -reset
+```
+
+See [`cmd/sim/README.md`](cmd/sim/README.md) for the full flag reference and
+additional examples.
+
 ## UML
 
 
