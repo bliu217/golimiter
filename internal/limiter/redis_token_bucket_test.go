@@ -129,12 +129,12 @@ func TestRedisLimiter_ConcurrentRequestsRespectCapacity(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func() {
 			defer wg.Done()
-			ok, err := l.Allow("shared", 1)
+			result, err := l.Allow("shared", 1)
 			if err != nil {
 				t.Errorf("allow failed: %v", err)
 				return
 			}
-			if ok {
+			if result.Allowed {
 				allowed.Add(1)
 			}
 		}()
@@ -143,5 +143,36 @@ func TestRedisLimiter_ConcurrentRequestsRespectCapacity(t *testing.T) {
 
 	if got := allowed.Load(); got != int64(capacity) {
 		t.Fatalf("allowed = %d, want %d", got, int64(capacity))
+	}
+}
+
+func TestRedisLimiter_ResetDeletesBucketKeys(t *testing.T) {
+	ctx := context.Background()
+	rdb := newIntegrationRedisClient(t)
+	const (
+		prefix = "reset"
+		key    = "user-a"
+	)
+
+	l, err := newRedisTokenBucketLimiterWithClock(rdb, 2, 1, prefix, nil)
+	if err != nil {
+		t.Fatalf("new limiter: %v", err)
+	}
+	if _, err := l.Allow(key, 2); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	redisKey := fmt.Sprintf("%s:tb:{%s}", prefix, key)
+	if exists, err := rdb.Exists(ctx, redisKey).Result(); err != nil || exists != 1 {
+		t.Fatalf("exists before reset = %v, err = %v; want 1, nil", exists, err)
+	}
+	if err := l.Reset(); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if exists, err := rdb.Exists(ctx, redisKey).Result(); err != nil || exists != 0 {
+		t.Fatalf("exists after reset = %v, err = %v; want 0, nil", exists, err)
+	}
+	result, err := l.Allow(key, 2)
+	if err != nil || !result.Allowed {
+		t.Fatalf("allow after reset: allowed=%v err=%v", result.Allowed, err)
 	}
 }

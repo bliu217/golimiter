@@ -21,11 +21,11 @@ func runLimiterConformance(t *testing.T, name string, factory limiterFactory) {
 	t.Run(name+"/empty_key_returns_error", func(t *testing.T) {
 		clk := newFakeClock(time.Unix(0, 0))
 		l := factory(t, 5, 1, clk)
-		ok, err := l.Allow("", 1)
+		result, err := l.Allow("", 1)
 		if err == nil {
 			t.Fatal("expected error on empty key")
 		}
-		if ok {
+		if result.Allowed {
 			t.Error("ok = true, want false")
 		}
 	})
@@ -34,17 +34,26 @@ func runLimiterConformance(t *testing.T, name string, factory limiterFactory) {
 		clk := newFakeClock(time.Unix(0, 0))
 		l := factory(t, 5, 1, clk)
 		for i := 0; i < 5; i++ {
-			ok, err := l.Allow("k", 1)
-			if err != nil || !ok {
-				t.Fatalf("call %d: ok=%v err=%v", i, ok, err)
+			result, err := l.Allow("k", 1)
+			if err != nil || !result.Allowed {
+				t.Fatalf("call %d: allowed=%v err=%v", i, result.Allowed, err)
+			}
+			if wantRemaining := int32(4 - i); result.Remaining != wantRemaining {
+				t.Fatalf("call %d: remaining=%v want %v", i, result.Remaining, wantRemaining)
 			}
 		}
-		ok, err := l.Allow("k", 1)
+		result, err := l.Allow("k", 1)
 		if err != nil {
 			t.Fatalf("err = %v on exhausted bucket, want nil", err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Fatal("expected exhaustion")
+		}
+		if result.Remaining != 0 {
+			t.Fatalf("remaining=%v want 0", result.Remaining)
+		}
+		if result.ResetTimeSeconds != 1 {
+			t.Fatalf("resetTimeSeconds=%v want 1", result.ResetTimeSeconds)
 		}
 	})
 
@@ -54,13 +63,13 @@ func runLimiterConformance(t *testing.T, name string, factory limiterFactory) {
 		if _, err := l.Allow("a", 2); err != nil {
 			t.Fatalf("drain 'a': %v", err)
 		}
-		ok, err := l.Allow("a", 1)
-		if err != nil || ok {
-			t.Fatalf("'a' should be exhausted: ok=%v err=%v", ok, err)
+		result, err := l.Allow("a", 1)
+		if err != nil || result.Allowed {
+			t.Fatalf("'a' should be exhausted: allowed=%v err=%v", result.Allowed, err)
 		}
-		ok, err = l.Allow("b", 2)
-		if err != nil || !ok {
-			t.Fatalf("'b' should be untouched: ok=%v err=%v", ok, err)
+		result, err = l.Allow("b", 2)
+		if err != nil || !result.Allowed {
+			t.Fatalf("'b' should be untouched: allowed=%v err=%v", result.Allowed, err)
 		}
 	})
 
@@ -72,16 +81,38 @@ func runLimiterConformance(t *testing.T, name string, factory limiterFactory) {
 				t.Fatalf("drain call %d: %v", i, err)
 			}
 		}
-		ok, _ := l.Allow("k", 1)
-		if ok {
+		result, _ := l.Allow("k", 1)
+		if result.Allowed {
 			t.Fatal("expected exhaustion before clock advance")
 		}
 		clk.Advance(time.Second)
 		for i := 0; i < 5; i++ {
-			ok, err := l.Allow("k", 1)
-			if err != nil || !ok {
-				t.Fatalf("post-refill call %d: ok=%v err=%v", i, ok, err)
+			result, err := l.Allow("k", 1)
+			if err != nil || !result.Allowed {
+				t.Fatalf("post-refill call %d: allowed=%v err=%v", i, result.Allowed, err)
 			}
+		}
+	})
+
+	t.Run(name+"/reset_restores_capacity", func(t *testing.T) {
+		clk := newFakeClock(time.Unix(0, 0))
+		l := factory(t, 2, 1, clk)
+		if _, err := l.Allow("k", 2); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+		result, err := l.Allow("k", 1)
+		if err != nil || result.Allowed {
+			t.Fatalf("expected exhaustion before reset: allowed=%v err=%v", result.Allowed, err)
+		}
+		if err := l.Reset(); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+		result, err = l.Allow("k", 2)
+		if err != nil || !result.Allowed {
+			t.Fatalf("expected fresh capacity after reset: allowed=%v err=%v", result.Allowed, err)
+		}
+		if result.Remaining != 0 {
+			t.Fatalf("remaining after full-cost allow = %v, want 0", result.Remaining)
 		}
 	})
 

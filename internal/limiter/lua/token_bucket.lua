@@ -32,9 +32,12 @@ if elapsed_us > 0 then
 end
 
 local allowed = 0
+local reset_time_seconds = 0
 if tokens >= cost then
   tokens = tokens - cost
   allowed = 1
+else
+  reset_time_seconds = math.ceil((cost - tokens) / refill_rate)
 end
 
 redis.call("HSET", KEYS[1], "tokens", tostring(tokens), "last_refill_us", tostring(last_refill_us))
@@ -45,4 +48,4 @@ if ttl_ms < 1 then
 end
 redis.call("PEXPIRE", KEYS[1], ttl_ms)
 
-return {allowed, tostring(tokens)}
+return {allowed, tostring(tokens), tostring(reset_time_seconds)}

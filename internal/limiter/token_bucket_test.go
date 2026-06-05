@@ -112,9 +112,9 @@ func TestTokenBucket_Allow_Validation(t *testing.T) {
 				t.Fatalf("setup: %v", err)
 			}
 			tokensBefore := tb.tokens
-			ok, err := tb.Allow(tc.cost)
-			if ok != tc.wantOK {
-				t.Errorf("ok = %v, want %v", ok, tc.wantOK)
+			result, err := tb.Allow(tc.cost)
+			if result.Allowed != tc.wantOK {
+				t.Errorf("allowed = %v, want %v", result.Allowed, tc.wantOK)
 			}
 			if (err != nil) != tc.wantErr {
 				t.Errorf("err = %v, wantErr = %v", err, tc.wantErr)
@@ -134,12 +134,15 @@ func TestTokenBucket_Allow_Validation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("setup: %v", err)
 		}
-		ok, err := tb.Allow(10)
+		result, err := tb.Allow(10)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !ok {
+		if !result.Allowed {
 			t.Fatal("expected allow=true when cost==capacity on full bucket")
+		}
+		if result.Remaining != 0 {
+			t.Errorf("remaining = %v, want 0", result.Remaining)
 		}
 		if tb.tokens != 0 {
 			t.Errorf("tokens = %v, want 0", tb.tokens)
@@ -153,9 +156,12 @@ func TestTokenBucket_Allow_ConsumeSemantics(t *testing.T) {
 	t.Run("single_request_decrements_exactly", func(t *testing.T) {
 		clk := newFakeClock(time.Unix(0, 0))
 		tb, _ := newTokenBucketWithClock(10, 1, clk)
-		ok, err := tb.Allow(3)
-		if err != nil || !ok {
-			t.Fatalf("Allow(3) = %v, %v; want true, nil", ok, err)
+		result, err := tb.Allow(3)
+		if err != nil || !result.Allowed {
+			t.Fatalf("Allow(3) = %v, %v; want true, nil", result.Allowed, err)
+		}
+		if result.Remaining != 7 {
+			t.Errorf("remaining = %v, want 7", result.Remaining)
 		}
 		if tb.tokens != 7 {
 			t.Errorf("tokens = %v, want 7", tb.tokens)
@@ -166,17 +172,23 @@ func TestTokenBucket_Allow_ConsumeSemantics(t *testing.T) {
 		clk := newFakeClock(time.Unix(0, 0))
 		tb, _ := newTokenBucketWithClock(5, 1, clk)
 		for i := 0; i < 5; i++ {
-			ok, err := tb.Allow(1)
-			if err != nil || !ok {
-				t.Fatalf("call %d: Allow(1) = %v, %v", i, ok, err)
+			result, err := tb.Allow(1)
+			if err != nil || !result.Allowed {
+				t.Fatalf("call %d: Allow(1) = %v, %v", i, result.Allowed, err)
 			}
 		}
-		ok, err := tb.Allow(1)
+		result, err := tb.Allow(1)
 		if err != nil {
 			t.Fatalf("expected nil err on insufficient tokens, got %v", err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Fatal("expected failure when out of tokens")
+		}
+		if result.Remaining != 0 {
+			t.Errorf("remaining = %v, want 0", result.Remaining)
+		}
+		if result.ResetTimeSeconds != 1 {
+			t.Errorf("resetTimeSeconds = %v, want 1", result.ResetTimeSeconds)
 		}
 		if tb.tokens != 0 {
 			t.Errorf("tokens = %v, want 0 (no negative balance)", tb.tokens)
@@ -187,16 +199,16 @@ func TestTokenBucket_Allow_ConsumeSemantics(t *testing.T) {
 		clk := newFakeClock(time.Unix(0, 0))
 		tb, _ := newTokenBucketWithClock(1.0, 1, clk)
 		for i := 0; i < 4; i++ {
-			ok, err := tb.Allow(0.25)
-			if err != nil || !ok {
-				t.Fatalf("call %d: Allow(0.25) = %v, %v", i, ok, err)
+			result, err := tb.Allow(0.25)
+			if err != nil || !result.Allowed {
+				t.Fatalf("call %d: Allow(0.25) = %v, %v", i, result.Allowed, err)
 			}
 		}
-		ok, err := tb.Allow(0.25)
+		result, err := tb.Allow(0.25)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Fatal("5th call should fail")
 		}
 	})
@@ -208,11 +220,11 @@ func TestTokenBucket_Allow_ConsumeSemantics(t *testing.T) {
 		if tb.tokens != 0 {
 			t.Fatalf("setup: tokens = %v, want 0", tb.tokens)
 		}
-		ok, err := tb.Allow(1)
+		result, err := tb.Allow(1)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Fatal("expected failure")
 		}
 		if tb.tokens != 0 {
@@ -227,14 +239,14 @@ func TestTokenBucket_Allow_Refill(t *testing.T) {
 	t.Run("one_token_restored_after_one_over_refillRate", func(t *testing.T) {
 		clk := newFakeClock(time.Unix(0, 0))
 		tb, _ := newTokenBucketWithClock(10, 5, clk) // 5 tokens/sec
-		ok, err := tb.Allow(10)
-		if !ok || err != nil {
-			t.Fatalf("drain: %v %v", ok, err)
+		result, err := tb.Allow(10)
+		if !result.Allowed || err != nil {
+			t.Fatalf("drain: %v %v", result.Allowed, err)
 		}
 		clk.Advance(200 * time.Millisecond) // exactly 1 token at 5/sec
-		ok, err = tb.Allow(1)
-		if err != nil || !ok {
-			t.Fatalf("Allow(1) after refill: %v %v", ok, err)
+		result, err = tb.Allow(1)
+		if err != nil || !result.Allowed {
+			t.Fatalf("Allow(1) after refill: %v %v", result.Allowed, err)
 		}
 		if !approxEqual(tb.tokens, 0) {
 			t.Errorf("tokens = %v, want ~0", tb.tokens)
@@ -246,15 +258,15 @@ func TestTokenBucket_Allow_Refill(t *testing.T) {
 		tb, _ := newTokenBucketWithClock(10, 5, clk)
 		_, _ = tb.Allow(10)
 		clk.Advance(400 * time.Millisecond) // 2 tokens
-		ok, err := tb.Allow(2)
-		if !ok || err != nil {
-			t.Fatalf("Allow(2): %v %v", ok, err)
+		result, err := tb.Allow(2)
+		if !result.Allowed || err != nil {
+			t.Fatalf("Allow(2): %v %v", result.Allowed, err)
 		}
-		ok, err = tb.Allow(0.01)
+		result, err = tb.Allow(0.01)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Fatal("expected failure when only ~0 tokens remain")
 		}
 	})
@@ -264,19 +276,19 @@ func TestTokenBucket_Allow_Refill(t *testing.T) {
 		tb, _ := newTokenBucketWithClock(10, 5, clk)
 		_, _ = tb.Allow(10)
 		clk.Advance(time.Hour) // would overfill by 18000 tokens uncapped
-		ok, err := tb.Allow(10)
-		if !ok || err != nil {
-			t.Fatalf("Allow(10) after long pause: %v %v", ok, err)
+		result, err := tb.Allow(10)
+		if !result.Allowed || err != nil {
+			t.Fatalf("Allow(10) after long pause: %v %v", result.Allowed, err)
 		}
 		if !approxEqual(tb.tokens, 0) {
 			t.Errorf("tokens = %v, want ~0 (capacity 10 minus cost 10)", tb.tokens)
 		}
 		// No further time has advanced; a small additional spend must fail.
-		ok, err = tb.Allow(0.01)
+		result, err = tb.Allow(0.01)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Fatal("expected failure: refill should have been capped at capacity")
 		}
 	})
@@ -316,9 +328,9 @@ func TestTokenBucket_Allow_Refill(t *testing.T) {
 		clk.Advance(-50 * time.Second) // simulated clock skew backwards
 		before := tb.tokens
 		lastBefore := tb.lastRefillTime
-		ok, err := tb.Allow(1)
-		if err != nil || !ok {
-			t.Fatalf("Allow(1): %v %v", ok, err)
+		result, err := tb.Allow(1)
+		if err != nil || !result.Allowed {
+			t.Fatalf("Allow(1): %v %v", result.Allowed, err)
 		}
 		if got, want := tb.tokens, before-1; got != want {
 			t.Errorf("tokens = %v, want %v (no refill on negative elapsed)", got, want)
@@ -397,11 +409,11 @@ func newTestLimiter(t *testing.T, capacity, refillRate float64) (*InMemoryTokenB
 func TestInMemoryTokenBucketLimiter_Allow(t *testing.T) {
 	t.Run("empty_key", func(t *testing.T) {
 		l, _ := newTestLimiter(t, 5, 1)
-		ok, err := l.Allow("", 1)
+		result, err := l.Allow("", 1)
 		if err == nil || !strings.Contains(err.Error(), "key cannot be empty") {
-			t.Fatalf("expected key error, got ok=%v err=%v", ok, err)
+			t.Fatalf("expected key error, got allowed=%v err=%v", result.Allowed, err)
 		}
-		if ok {
+		if result.Allowed {
 			t.Error("ok = true, want false")
 		}
 		if len(l.buckets) != 0 {
@@ -411,9 +423,12 @@ func TestInMemoryTokenBucketLimiter_Allow(t *testing.T) {
 
 	t.Run("creates_bucket_on_first_call", func(t *testing.T) {
 		l, _ := newTestLimiter(t, 5, 1)
-		ok, err := l.Allow("a", 1)
-		if err != nil || !ok {
-			t.Fatalf("Allow(a,1): %v %v", ok, err)
+		result, err := l.Allow("a", 1)
+		if err != nil || !result.Allowed {
+			t.Fatalf("Allow(a,1): %v %v", result.Allowed, err)
+		}
+		if result.Remaining != 4 {
+			t.Errorf("remaining = %v, want 4", result.Remaining)
 		}
 		if _, ok := l.buckets["a"]; !ok {
 			t.Fatal("bucket for 'a' not created")
@@ -440,18 +455,18 @@ func TestInMemoryTokenBucketLimiter_Allow(t *testing.T) {
 	t.Run("keys_are_independent", func(t *testing.T) {
 		l, _ := newTestLimiter(t, 5, 1)
 		for i := 0; i < 5; i++ {
-			ok, err := l.Allow("a", 1)
-			if err != nil || !ok {
-				t.Fatalf("draining 'a' #%d: %v %v", i, ok, err)
+			result, err := l.Allow("a", 1)
+			if err != nil || !result.Allowed {
+				t.Fatalf("draining 'a' #%d: %v %v", i, result.Allowed, err)
 			}
 		}
-		ok, _ := l.Allow("a", 1)
-		if ok {
+		result, _ := l.Allow("a", 1)
+		if result.Allowed {
 			t.Fatal("'a' should be exhausted")
 		}
-		ok, err := l.Allow("b", 1)
-		if err != nil || !ok {
-			t.Fatalf("'b' Allow(1): %v %v", ok, err)
+		result, err := l.Allow("b", 1)
+		if err != nil || !result.Allowed {
+			t.Fatalf("'b' Allow(1): %v %v", result.Allowed, err)
 		}
 	})
 
@@ -468,14 +483,33 @@ func TestInMemoryTokenBucketLimiter_Allow(t *testing.T) {
 	t.Run("per_key_buckets_share_injected_clock", func(t *testing.T) {
 		l, clk := newTestLimiter(t, 5, 5)
 		_, _ = l.Allow("a", 5) // drain
-		ok, _ := l.Allow("a", 1)
-		if ok {
+		result, _ := l.Allow("a", 1)
+		if result.Allowed {
 			t.Fatal("'a' should be exhausted before clock advance")
 		}
 		clk.Advance(time.Second)
-		ok, err := l.Allow("a", 5)
-		if err != nil || !ok {
-			t.Fatalf("expected refill via shared clock: %v %v", ok, err)
+		result, err := l.Allow("a", 5)
+		if err != nil || !result.Allowed {
+			t.Fatalf("expected refill via shared clock: %v %v", result.Allowed, err)
+		}
+	})
+
+	t.Run("reset_clears_existing_buckets", func(t *testing.T) {
+		l, _ := newTestLimiter(t, 2, 1)
+		_, _ = l.Allow("a", 2)
+		result, _ := l.Allow("a", 1)
+		if result.Allowed {
+			t.Fatal("'a' should be exhausted before reset")
+		}
+		if err := l.Reset(); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+		if len(l.buckets) != 0 {
+			t.Fatalf("bucket count after reset = %d, want 0", len(l.buckets))
+		}
+		result, err := l.Allow("a", 2)
+		if err != nil || !result.Allowed {
+			t.Fatalf("Allow after reset: allowed=%v err=%v", result.Allowed, err)
 		}
 	})
 }
@@ -495,12 +529,12 @@ func TestTokenBucket_Allow_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok, err := tb.Allow(1)
+			result, err := tb.Allow(1)
 			if err != nil {
 				t.Errorf("unexpected err: %v", err)
 				return
 			}
-			if ok {
+			if result.Allowed {
 				atomic.AddInt64(&successes, 1)
 			}
 		}()
@@ -524,12 +558,12 @@ func TestInMemoryLimiter_Allow_Concurrent_SameKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok, err := l.Allow("shared", 1)
+			result, err := l.Allow("shared", 1)
 			if err != nil {
 				t.Errorf("unexpected err: %v", err)
 				return
 			}
-			if ok {
+			if result.Allowed {
 				atomic.AddInt64(&successes, 1)
 			}
 		}()
@@ -560,12 +594,12 @@ func TestInMemoryLimiter_Allow_Concurrent_DistinctKeys(t *testing.T) {
 			go func(k int) {
 				defer wg.Done()
 				key := fmt.Sprintf("k-%d", k)
-				ok, err := l.Allow(key, 1)
+				result, err := l.Allow(key, 1)
 				if err != nil {
 					t.Errorf("unexpected err: %v", err)
 					return
 				}
-				if ok {
+				if result.Allowed {
 					atomic.AddInt64(&successes[k], 1)
 				}
 			}(k)

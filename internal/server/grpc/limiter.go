@@ -12,14 +12,13 @@ type RateLimiterServer struct {
 	pb.UnimplementedRateLimiterServer
 	limiter limiter.Limiter
 	deps    limiter.Deps
-	mu      sync.Mutex
+	mu      sync.RWMutex
 }
 
 func NewRateLimiterServer(l limiter.Limiter, deps limiter.Deps) *RateLimiterServer {
 	return &RateLimiterServer{
 		limiter: l,
 		deps:    deps,
-		mu:      sync.Mutex{},
 	}
 }
 
@@ -49,18 +48,34 @@ func (s *RateLimiterServer) Allow(
 	req *pb.AllowRequest,
 ) (*pb.AllowResponse, error) {
 	bucket_key := req.Key + ":" + req.Resource
-	allowed, err := s.limiter.Allow(bucket_key, float64(req.Cost))
+	s.mu.RLock()
+	result, err := s.limiter.Allow(bucket_key, float64(req.Cost))
+	s.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
 
 	reason := ""
-	if !allowed {
+	if !result.Allowed {
 		reason = "rate limit exceeded"
 	}
 
 	return &pb.AllowResponse{
-		Allowed: allowed,
-		Reason:  reason,
+		Allowed:   result.Allowed,
+		Reason:    reason,
+		Remaining: result.Remaining,
+		ResetTime: result.ResetTimeSeconds,
 	}, nil
+}
+
+func (s *RateLimiterServer) Reset(
+	ctx context.Context,
+	req *pb.ResetRequest,
+) (*pb.ResetResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.limiter.Reset(); err != nil {
+		return nil, err
+	}
+	return &pb.ResetResponse{Success: true}, nil
 }

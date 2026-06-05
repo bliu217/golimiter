@@ -1,6 +1,7 @@
 package limiter
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -9,13 +10,26 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type AllowResult struct {
+	Allowed          bool
+	Remaining        int32
+	ResetTimeSeconds int64
+}
+
 type Limiter interface {
-	Allow(key string, cost float64) (bool, error)
+	Allow(key string, cost float64) (AllowResult, error)
+	Reset() error
 }
 
 type Deps struct {
-	RedisClient    redis.Scripter
+	RedisClient    RedisClient
 	RedisKeyPrefix string
+}
+
+type RedisClient interface {
+	redis.Scripter
+	Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
 }
 
 func NewLimiterFromConfig(req *pb.ConfigureRequest) (Limiter, error) {

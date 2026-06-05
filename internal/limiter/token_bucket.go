@@ -3,6 +3,7 @@ package limiter
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -24,9 +25,9 @@ type InMemoryTokenBucketLimiter struct {
 	mu         sync.Mutex
 }
 
-func (l *InMemoryTokenBucketLimiter) Allow(key string, cost float64) (bool, error) {
+func (l *InMemoryTokenBucketLimiter) Allow(key string, cost float64) (AllowResult, error) {
 	if key == "" {
-		return false, errors.New("key cannot be empty")
+		return AllowResult{}, errors.New("key cannot be empty")
 	}
 	l.mu.Lock()
 	bucket, exists := l.buckets[key]
@@ -35,13 +36,20 @@ func (l *InMemoryTokenBucketLimiter) Allow(key string, cost float64) (bool, erro
 		bucket, err = newTokenBucketWithClock(l.capacity, l.refillRate, l.clock)
 		if err != nil {
 			l.mu.Unlock()
-			return false, fmt.Errorf("failed to create token bucket: %w", err)
+			return AllowResult{}, fmt.Errorf("failed to create token bucket: %w", err)
 		}
 		l.buckets[key] = bucket
 	}
 
 	l.mu.Unlock()
 	return bucket.Allow(cost)
+}
+
+func (l *InMemoryTokenBucketLimiter) Reset() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buckets = make(map[string]*TokenBucket)
+	return nil
 }
 
 func NewInMemoryTokenBucketLimiter(capacity, refillRate float64) (Limiter, error) {
@@ -71,12 +79,12 @@ func newInMemoryTokenBucketLimiterWithClock(capacity, refillRate float64, clock 
 	}, nil
 }
 
-func (tb *TokenBucket) Allow(cost float64) (bool, error) {
+func (tb *TokenBucket) Allow(cost float64) (AllowResult, error) {
 	if cost <= 0 {
-		return false, errors.New("cost must be positive")
+		return AllowResult{}, errors.New("cost must be positive")
 	}
 	if cost > tb.capacity {
-		return false, errors.New("cost exceeds bucket capacity")
+		return AllowResult{}, errors.New("cost exceeds bucket capacity")
 	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
@@ -88,10 +96,18 @@ func (tb *TokenBucket) Allow(cost float64) (bool, error) {
 		tb.lastRefillTime = now
 	}
 	if tb.tokens < cost {
-		return false, nil
+		return AllowResult{
+			Allowed:          false,
+			Remaining:        remainingTokens(tb.tokens),
+			ResetTimeSeconds: resetTimeSeconds(cost, tb.tokens, tb.refillRate),
+		}, nil
 	}
 	tb.tokens -= cost
-	return true, nil
+	return AllowResult{
+		Allowed:          true,
+		Remaining:        remainingTokens(tb.tokens),
+		ResetTimeSeconds: 0,
+	}, nil
 }
 
 func NewTokenBucket(capacity, refillRate float64) (*TokenBucket, error) {
@@ -115,4 +131,18 @@ func newTokenBucketWithClock(capacity, refillRate float64, clock Clock) (*TokenB
 		lastRefillTime: clock.Now(),
 		clock:          clock,
 	}, nil
+}
+
+func remainingTokens(tokens float64) int32 {
+	if tokens <= 0 {
+		return 0
+	}
+	return int32(math.Floor(tokens))
+}
+
+func resetTimeSeconds(cost, tokens, refillRate float64) int64 {
+	if tokens >= cost || refillRate <= 0 {
+		return 0
+	}
+	return int64(math.Ceil((cost - tokens) / refillRate))
 }
