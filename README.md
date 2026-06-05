@@ -49,9 +49,11 @@ exercise in-memory or Redis-backed token bucket behavior during local
 development.
 
 The CLI can vary request count, concurrency, key cardinality, resource, cost,
-per-RPC timeout, and whether to reset limiter state before a run. Its summary
-reports allowed, denied, and error totals along with throughput, latency, and
-the latest `remaining` / `reset_time` metadata returned by the service.
+per-RPC timeout, retry/backoff behavior, request dispatch rate, and whether to
+reset limiter state before a run. Its summary reports allowed, denied, and
+error totals along with throughput, latency, error categories, and the latest
+`remaining` / `reset_time` metadata returned by the service. Each run also
+writes a JSON summary for later analysis.
 
 Example:
 

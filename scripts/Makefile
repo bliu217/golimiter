@@ -11,3 +11,6 @@ test-unit:
 
 test-integration:
 	@cd .. && go test -tags=integration ./...
+
+clean-sim-summaries:
+	@cd .. && rm -f cmd/sim/summaries/*.json
