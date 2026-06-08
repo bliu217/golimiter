@@ -1,0 +1,16 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose*.yml
+docker-compose*.yaml
+
+cmd/sim/summaries/
+coverage.*
+*.coverprofile
+*.out
+*.test
+
+.env
+.idea/
+.vscode/

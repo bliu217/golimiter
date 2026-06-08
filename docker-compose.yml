@@ -1,0 +1,36 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  limiter:
+    build:
+      context: .
+      target: limiter
+    depends_on:
+      - redis
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./config/limiter.docker.yaml:/app/config/limiter.yaml:ro
+
+  sim:
+    build:
+      context: .
+      target: sim
+    profiles:
+      - tools
+    depends_on:
+      - limiter
+    command:
+      - "-addr=limiter:50051"
+      - "-requests=100"
+      - "-concurrency=10"
+      - "-reset"
+      - "-output-dir=/tmp/golimiter-summaries"
+
+volumes:
+  redis-data:

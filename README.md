@@ -64,6 +64,26 @@ go run ./cmd/sim -addr localhost:50051 -requests 100 -concurrency 10 -keys 5 -re
 See [`cmd/sim/README.md`](cmd/sim/README.md) for the full flag reference and
 additional examples.
 
+## Docker Compose
+
+The local Compose stack runs Redis and the gRPC limiter service with the
+Redis-backed token bucket config from `config/limiter.docker.yaml`.
+
+Start the stack:
+
+```sh
+docker compose up --build redis limiter
+```
+
+Run the simulator against the Compose network:
+
+```sh
+docker compose --profile tools run --rm --build sim
+```
+
+The limiter is exposed on `localhost:50051`, and Redis is exposed on
+`localhost:6379` for local inspection.
+
 ## UML
 
 
