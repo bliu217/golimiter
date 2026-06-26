@@ -24,13 +24,11 @@ Load test and expose metrics for the service
 Go - Simulator Client, gRPC Service  
 Docker - Multiple nodes  
 Redis - Shared state + atomic coordination across nodes  
-k6 (TBD) - Load testing  
-React - Simple UI for simulator  
-Prometheus/Grafana - Metrics + UI  
+(TBD) React - Simple UI for simulator  
+(TBD) Prometheus/Grafana - Metrics + UI  
 
-## AWS Deployment
-Clients -> Application Load Balancer -> ECS and ECR -> ElastiCache  
-CloudWatch to collect logs/metrics, AppConfig to centralize rate-limiter algorithm selection  
+## (TBD) Deployment
+EC2 → Docker Compose → Nginx/Traefik → 2-3 limiter containers + Redis
 
 ## Distributed State (Redis)
 - Atomic Lua scripting (`EVAL` / `EVALSHA` / `SCRIPT LOAD`) keeps refill, limit check, and token decrement in one server-side transaction so concurrent nodes cannot oversubscribe a bucket.
@@ -83,11 +81,5 @@ docker compose --profile tools run --rm --build sim
 
 The limiter is exposed on `localhost:50051`, and Redis is exposed on
 `localhost:6379` for local inspection.
-
-## UML
-
-
-# Metrics
-## Simulator
 
 ## k6
