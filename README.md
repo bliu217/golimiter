@@ -81,5 +81,3 @@ docker compose --profile tools run --rm --build sim
 
 The limiter is exposed on `localhost:50051`, and Redis is exposed on
 `localhost:6379` for local inspection.
-
-## k6
