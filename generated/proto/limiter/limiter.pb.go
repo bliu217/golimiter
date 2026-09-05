@@ -315,9 +315,12 @@ func (*ConfigureRequest_FixedWindow) isConfigureRequest_Config() {}
 func (*ConfigureRequest_SlidingWindow) isConfigureRequest_Config() {}
 
 type TokenBucketConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Capacity      float64                `protobuf:"fixed64,1,opt,name=capacity,proto3" json:"capacity,omitempty"`
-	RefillRate    float64                `protobuf:"fixed64,2,opt,name=refill_rate,json=refillRate,proto3" json:"refill_rate,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Capacity   float64                `protobuf:"fixed64,1,opt,name=capacity,proto3" json:"capacity,omitempty"`
+	RefillRate float64                `protobuf:"fixed64,2,opt,name=refill_rate,json=refillRate,proto3" json:"refill_rate,omitempty"`
+	// Tokens to check out from Redis per miss. 0 or 1 keeps one Redis round trip
+	// per Allow. Values above 1 enable the per-node lease cache.
+	LeaseSize     float64 `protobuf:"fixed64,3,opt,name=lease_size,json=leaseSize,proto3" json:"lease_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -362,6 +365,13 @@ func (x *TokenBucketConfig) GetCapacity() float64 {
 func (x *TokenBucketConfig) GetRefillRate() float64 {
 	if x != nil {
 		return x.RefillRate
+	}
+	return 0
+}
+
+func (x *TokenBucketConfig) GetLeaseSize() float64 {
+	if x != nil {
+		return x.LeaseSize
 	}
 	return 0
 }
@@ -623,11 +633,13 @@ const file_limiter_proto_rawDesc = "" +
 	"\ftoken_bucket\x18\x02 \x01(\v2\x1d.limiter.v1.TokenBucketConfigH\x00R\vtokenBucket\x12B\n" +
 	"\ffixed_window\x18\x03 \x01(\v2\x1d.limiter.v1.FixedWindowConfigH\x00R\vfixedWindow\x12H\n" +
 	"\x0esliding_window\x18\x04 \x01(\v2\x1f.limiter.v1.SlidingWindowConfigH\x00R\rslidingWindowB\b\n" +
-	"\x06config\"P\n" +
+	"\x06config\"o\n" +
 	"\x11TokenBucketConfig\x12\x1a\n" +
 	"\bcapacity\x18\x01 \x01(\x01R\bcapacity\x12\x1f\n" +
 	"\vrefill_rate\x18\x02 \x01(\x01R\n" +
-	"refillRate\"P\n" +
+	"refillRate\x12\x1d\n" +
+	"\n" +
+	"lease_size\x18\x03 \x01(\x01R\tleaseSize\"P\n" +
 	"\x11FixedWindowConfig\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x03R\x05limit\x12%\n" +
 	"\x0ewindow_seconds\x18\x02 \x01(\x03R\rwindowSeconds\"R\n" +

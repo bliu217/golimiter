@@ -40,6 +40,7 @@ Flags:
 - `-output-dir`: directory for JSON summary files. Default: `cmd/sim/summaries`.
 - `-capacity`: token-bucket capacity used for expected-token math and optional `Configure`. Default: `0`.
 - `-refill-rate`: token-bucket refill rate used for expected-token math and optional `Configure`. Default: `0`.
+- `-lease-size`: Redis checkout size used with `-configure`. `0` or `1` keeps one Redis round trip per Allow; larger values enable the per-node lease cache.
 - `-configure`: call `Configure` on every address with `-capacity` and `-refill-rate` before `Reset`.
 
 When `-keys` is greater than `1`, request keys are generated as

@@ -14,17 +14,32 @@ import (
 //go:embed lua/token_bucket.lua
 var tokenBucketLua string
 
+//go:embed lua/token_bucket_checkout.lua
+var tokenBucketCheckoutLua string
+
 type RedisTokenBucketLimiter struct {
-	rdb        RedisClient
-	script     *redis.Script
-	capacity   float64
-	refillRate float64
-	keyPrefix  string
-	clock      Clock
+	rdb            RedisClient
+	script         *redis.Script
+	checkoutScript *redis.Script
+	capacity       float64
+	refillRate     float64
+	keyPrefix      string
+	clock          Clock
 }
 
 func NewRedisTokenBucketLimiter(rdb RedisClient, capacity, refillRate float64, keyPrefix string) (Limiter, error) {
-	return newRedisTokenBucketLimiterWithClock(rdb, capacity, refillRate, keyPrefix, nil)
+	return NewRedisTokenBucketLimiterWithLease(rdb, capacity, refillRate, keyPrefix, 0)
+}
+
+func NewRedisTokenBucketLimiterWithLease(rdb RedisClient, capacity, refillRate float64, keyPrefix string, leaseSize float64) (Limiter, error) {
+	inner, err := newRedisTokenBucketLimiterWithClock(rdb, capacity, refillRate, keyPrefix, nil)
+	if err != nil {
+		return nil, err
+	}
+	if leaseSize <= 1 {
+		return inner, nil
+	}
+	return newLeasingLimiter(inner, leaseSize, capacity)
 }
 
 func newRedisTokenBucketLimiterWithClock(
@@ -47,12 +62,13 @@ func newRedisTokenBucketLimiterWithClock(
 	}
 
 	return &RedisTokenBucketLimiter{
-		rdb:        rdb,
-		script:     redis.NewScript(tokenBucketLua),
-		capacity:   capacity,
-		refillRate: refillRate,
-		keyPrefix:  keyPrefix,
-		clock:      clock,
+		rdb:            rdb,
+		script:         redis.NewScript(tokenBucketLua),
+		checkoutScript: redis.NewScript(tokenBucketCheckoutLua),
+		capacity:       capacity,
+		refillRate:     refillRate,
+		keyPrefix:      keyPrefix,
+		clock:          clock,
 	}, nil
 }
 
@@ -106,6 +122,57 @@ func (l *RedisTokenBucketLimiter) Allow(key string, cost float64) (AllowResult, 
 	return AllowResult{
 		Allowed:          allowedInt == 1,
 		Remaining:        remainingTokens(tokens),
+		ResetTimeSeconds: resetTimeSeconds,
+	}, nil
+}
+
+func (l *RedisTokenBucketLimiter) Checkout(key string, requested float64) (CheckoutResult, error) {
+	if key == "" {
+		return CheckoutResult{}, errors.New("key cannot be empty")
+	}
+	if requested <= 0 {
+		return CheckoutResult{}, errors.New("requested tokens must be positive")
+	}
+
+	nowOverride := int64(-1)
+	if l.clock != nil {
+		nowOverride = l.clock.Now().UnixMicro()
+	}
+
+	result, err := l.checkoutScript.Run(
+		context.Background(),
+		l.rdb,
+		[]string{fmt.Sprintf("%s:tb:{%s}", l.keyPrefix, key)},
+		l.capacity,
+		l.refillRate,
+		requested,
+		nowOverride,
+	).Result()
+	if err != nil {
+		return CheckoutResult{}, fmt.Errorf("redis token bucket checkout failed: %w", err)
+	}
+
+	raw, ok := result.([]interface{})
+	if !ok || len(raw) < 3 {
+		return CheckoutResult{}, fmt.Errorf("unexpected redis token bucket checkout result type %T", result)
+	}
+
+	granted, err := toFloat64(raw[0])
+	if err != nil {
+		return CheckoutResult{}, fmt.Errorf("failed to parse granted tokens: %w", err)
+	}
+	tokens, err := toFloat64(raw[1])
+	if err != nil {
+		return CheckoutResult{}, fmt.Errorf("failed to parse remaining tokens: %w", err)
+	}
+	resetTimeSeconds, err := toInt64(raw[2])
+	if err != nil {
+		return CheckoutResult{}, fmt.Errorf("failed to parse reset time: %w", err)
+	}
+
+	return CheckoutResult{
+		Granted:          granted,
+		Remaining:        tokens,
 		ResetTimeSeconds: resetTimeSeconds,
 	}, nil
 }

@@ -176,3 +176,63 @@ func TestRedisLimiter_ResetDeletesBucketKeys(t *testing.T) {
 		t.Fatalf("allow after reset: allowed=%v err=%v", result.Allowed, err)
 	}
 }
+
+func TestRedisLimiter_CheckoutGrantsPartial(t *testing.T) {
+	rdb := newIntegrationRedisClient(t)
+	l, err := newRedisTokenBucketLimiterWithClock(rdb, 10, 0.000001, "checkout", nil)
+	if err != nil {
+		t.Fatalf("new limiter: %v", err)
+	}
+
+	result, err := l.Checkout("user", 4)
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+	if result.Granted != 4 {
+		t.Fatalf("granted = %v, want 4", result.Granted)
+	}
+	if result.Remaining != 6 {
+		t.Fatalf("remaining = %v, want 6", result.Remaining)
+	}
+
+	result, err = l.Checkout("user", 10)
+	if err != nil {
+		t.Fatalf("second checkout: %v", err)
+	}
+	if result.Granted != 6 {
+		t.Fatalf("granted = %v, want 6", result.Granted)
+	}
+	if result.Remaining != 0 {
+		t.Fatalf("remaining = %v, want 0", result.Remaining)
+	}
+}
+
+func TestRedisLimiter_LeaseCacheConcurrentRespectsCapacity(t *testing.T) {
+	rdb := newIntegrationRedisClient(t)
+	l, err := NewRedisTokenBucketLimiterWithLease(rdb, 10, 0.000001, "lease-burst", 10)
+	if err != nil {
+		t.Fatalf("new limiter: %v", err)
+	}
+
+	const callers = 80
+	var allowed atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			defer wg.Done()
+			result, err := l.Allow("shared", 1)
+			if err != nil {
+				t.Errorf("allow: %v", err)
+				return
+			}
+			if result.Allowed {
+				allowed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := allowed.Load(); got != 10 {
+		t.Fatalf("allowed = %d, want 10", got)
+	}
+}

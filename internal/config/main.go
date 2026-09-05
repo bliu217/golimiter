@@ -33,6 +33,7 @@ type LimiterConfig struct {
 	TokenBucket struct {
 		Capacity   float64 `yaml:"capacity"`
 		RefillRate float64 `yaml:"refill_rate"`
+		LeaseSize  float64 `yaml:"lease_size"`
 	} `yaml:"token_bucket"`
 
 	FixedWindow struct {

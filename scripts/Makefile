@@ -23,3 +23,9 @@ scenarios-redis-1:
 
 scenarios-redis-3:
 	@cd .. && ./scripts/run-scenarios.sh redis-3
+
+scenarios-redis-1-lease:
+	@cd .. && ./scripts/run-scenarios.sh redis-1-lease
+
+scenarios-redis-3-lease:
+	@cd .. && ./scripts/run-scenarios.sh redis-3-lease

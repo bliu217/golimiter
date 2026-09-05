@@ -16,7 +16,7 @@ Load test and expose metrics for the service
 - System design
 - Load testing and performance monitoring
   - utilizing my own simulator and k6 to expose different metrics
-- In-memory caching for Redis optimization
+- Per-node token lease cache so Redis is not on the hot path of every Allow
 - Fallback for Redis downtime
 # Architecture 
   
@@ -39,6 +39,7 @@ EC2 → Docker Compose → Nginx/Traefik → 2-3 limiter containers + Redis
 - Connection pooling is handled by `go-redis`; per-node pool size should be tuned to expected concurrency and latency targets.
 - Failure behavior is currently deny-by-default when Redis is unavailable (errors bubble up); fail-open or fallback modes are tracked as separate follow-up work.
 - Cross-node consistency is strong per key because all bucket updates serialize through the same Redis primary.
+- Optional per-node lease cache (`lease_size` > 1) checks out a handful of tokens from Redis in one Lua script, then spends them locally. Redis still never grants more than the jar holds, so a hot-key burst stays at 0 oversubscription; unused tokens sitting in a node pocket can make other nodes look empty until refill.
 
 ## Simulator
 The simulator is a Go CLI test harness for the gRPC rate limiter. It sends
@@ -127,7 +128,7 @@ Reproduce after starting the matching topology (`go run ./cmd/limiter` for memor
 ./scripts/run-scenarios.sh redis-3
 ```
 
-JSON dumps land under `benchmarks/results/<target>/`. Make targets: `make -C scripts scenarios-memory`, `scenarios-redis-1`, `scenarios-redis-3`.
+JSON dumps land under `benchmarks/results/<target>/`. Make targets: `make -C scripts scenarios-memory`, `scenarios-redis-1`, `scenarios-redis-3`, `scenarios-redis-1-lease`, `scenarios-redis-3-lease`.
 
 ### Correctness and cardinality
 
@@ -173,3 +174,42 @@ Wide-open bucket, 5000 Allows, no errors in this sweep. p99 is the useful signal
 | redis-3 | 200 | 32686.82 | 5.769 | 10.170 | 19.815 |
 
 In-memory Allow peaked at about 78k RPS (p99 5.7ms at 200 workers). Redis Lua on one node peaked at about 41k RPS (p99 8.2ms). Three replicas sharing Redis peaked at about 33k RPS; p99 stayed under 3ms through 50 workers and crossed 10ms at 200. On redis-3, a hot key at 100 workers had a much worse tail (p99 45.9ms) than 1000 keys (p99 6.5ms).
+
+### Token lease cache (`lease_size=10`)
+
+Same scenarios, same machine, with each limiter node checking out 10 tokens from Redis per miss and serving later Allows from a local pocket. Enable it with `-lease-size 10` on Configure (the scenario targets `redis-1-lease` and `redis-3-lease`).
+
+Redis still deducts the checkout atomically, so the global jar cannot be overdrawn. Nodes can hog unused pocket tokens, which is why a tight bucket does not get much faster, and why allow-rate on `sustained-limit` sits a little further under the expected refill.
+
+| target | scenario | allowed | denied | errors | oversub | p50 ms | p99 ms | offered RPS |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| redis-1-lease | burst-hotkey | 10 | 190 | 0 | 0.0000 | 1.265 | 3.823 | 28337.03 |
+| redis-1-lease | sustained-limit | 65 | 235 | 0 | 0.0000 | 0.854 | 1.139 | 25.00 |
+| redis-1-lease | cardinality-hot | 2000 | 0 | 0 | 0.0000 | 2.054 | 7.623 | 39405.20 |
+| redis-1-lease | cardinality-wide | 2000 | 0 | 0 | 0.0000 | 2.004 | 11.119 | 39691.37 |
+| redis-3-lease | burst-hotkey | 10 | 190 | 0 | 0.0000 | 1.407 | 4.157 | 25305.77 |
+| redis-3-lease | sustained-limit | 64 | 236 | 0 | 0.0000 | 0.867 | 1.317 | 25.00 |
+| redis-3-lease | cardinality-hot | 2000 | 0 | 0 | 0.0000 | 1.325 | 3.780 | 61725.43 |
+| redis-3-lease | cardinality-wide | 2000 | 0 | 0 | 0.0000 | 3.497 | 49.927 | 16978.59 |
+
+Burst oversubscription stayed 0 on one and three replicas. The hot-key win is the point of the cache: redis-3 cardinality-hot went from **14.9k RPS / p99 45.9ms** without leases to **61.7k RPS / p99 3.8ms**. Wide cardinality on three nodes got worse (p99 50ms) because 1000 keys still miss to Redis; the pocket only helps when the same key is reused.
+
+| target | concurrency | offered RPS | p50 ms | p99 ms | max ms |
+|---|---:|---:|---:|---:|---:|
+| redis-1-lease | 1 | 2767.96 | 0.333 | 0.638 | 1.021 |
+| redis-1-lease | 10 | 15793.83 | 0.605 | 1.020 | 1.618 |
+| redis-1-lease | 50 | 42828.63 | 1.027 | 2.839 | 3.927 |
+| redis-1-lease | 100 | 43491.89 | 1.837 | 8.125 | 15.141 |
+| redis-1-lease | 200 | 43264.86 | 3.092 | 21.414 | 37.730 |
+| redis-3-lease | 1 | 2702.91 | 0.347 | 0.672 | 1.018 |
+| redis-3-lease | 10 | 17402.03 | 0.513 | 1.129 | 3.610 |
+| redis-3-lease | 50 | 51780.12 | 0.834 | 2.160 | 2.877 |
+| redis-3-lease | 100 | 71992.41 | 1.131 | 3.257 | 4.988 |
+| redis-3-lease | 200 | 84992.58 | 1.840 | 5.768 | 8.768 |
+
+Single-node Redis saturation is similar at the top (~43k vs ~41k RPS) with a better p50 at low concurrency (0.33ms vs 0.50ms) and a worse tail at 200 workers. Three replicas plus leases peaked at **~85k RPS, p99 5.8ms**, above the in-memory single-process run, because most Allows never wait on Redis.
+
+```sh
+./scripts/run-scenarios.sh redis-1-lease
+./scripts/run-scenarios.sh redis-3-lease
+```

@@ -50,6 +50,9 @@ message ConfigureRequest {
 message TokenBucketConfig {
   double capacity = 1;
   double refill_rate = 2;
+  // Tokens to check out from Redis per miss. 0 or 1 keeps one Redis round trip
+  // per Allow. Values above 1 enable the per-node lease cache.
+  double lease_size = 3;
 }
 
 message FixedWindowConfig {

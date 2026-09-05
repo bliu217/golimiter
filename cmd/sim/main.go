@@ -40,6 +40,7 @@ type simConfig struct {
 	capacity    float64
 	refillRate  float64
 	configure   bool
+	leaseSize   float64
 }
 
 type requestResult struct {
@@ -101,6 +102,7 @@ type jsonConfig struct {
 	OutputDir   string  `json:"output_dir"`
 	Capacity    float64 `json:"capacity"`
 	RefillRate  float64 `json:"refill_rate"`
+	LeaseSize   float64 `json:"lease_size"`
 	Configure   bool    `json:"configure"`
 }
 
@@ -181,6 +183,7 @@ func parseConfig(args []string, output io.Writer) (simConfig, error) {
 	fs.StringVar(&cfg.outputDir, "output-dir", cfg.outputDir, "directory for JSON summary files")
 	fs.Float64Var(&cfg.capacity, "capacity", cfg.capacity, "token bucket capacity used for expected-token math and optional Configure")
 	fs.Float64Var(&cfg.refillRate, "refill-rate", cfg.refillRate, "token bucket refill rate used for expected-token math and optional Configure")
+	fs.Float64Var(&cfg.leaseSize, "lease-size", cfg.leaseSize, "Redis token lease size used with -configure; 0 or 1 disables the lease cache")
 	fs.BoolVar(&cfg.configure, "configure", cfg.configure, "call Configure on every address with -capacity and -refill-rate before Reset")
 
 	if err := fs.Parse(args); err != nil {
@@ -234,6 +237,9 @@ func (cfg simConfig) validate() error {
 	}
 	if cfg.refillRate < 0 {
 		return errors.New("refill-rate must be non-negative")
+	}
+	if cfg.leaseSize < 0 {
+		return errors.New("lease-size must be non-negative")
 	}
 	if cfg.configure && cfg.capacity <= 0 {
 		return errors.New("configure requires capacity greater than 0")
@@ -317,6 +323,7 @@ func configureLimiter(ctx context.Context, cfg simConfig, client pb.RateLimiterC
 			TokenBucket: &pb.TokenBucketConfig{
 				Capacity:   cfg.capacity,
 				RefillRate: cfg.refillRate,
+				LeaseSize:  cfg.leaseSize,
 			},
 		},
 	})
@@ -614,6 +621,7 @@ func printConfig(output io.Writer, cfg simConfig) {
 	fmt.Fprintf(output, "  output_dir: %s\n", cfg.outputDir)
 	fmt.Fprintf(output, "  capacity: %.6g\n", cfg.capacity)
 	fmt.Fprintf(output, "  refill_rate: %.6g\n", cfg.refillRate)
+	fmt.Fprintf(output, "  lease_size: %.6g\n", cfg.leaseSize)
 	fmt.Fprintf(output, "  configure: %t\n", cfg.configure)
 }
 
@@ -719,6 +727,7 @@ func newJSONSummary(cfg simConfig, report summary) jsonSummary {
 			OutputDir:   cfg.outputDir,
 			Capacity:    cfg.capacity,
 			RefillRate:  cfg.refillRate,
+			LeaseSize:   cfg.leaseSize,
 			Configure:   cfg.configure,
 		},
 		Totals: jsonTotals{

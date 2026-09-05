@@ -241,6 +241,7 @@ func TestParseConfigRejectsInvalidValues(t *testing.T) {
 		{"configure_without_capacity", []string{"-configure", "-refill-rate", "5"}},
 		{"configure_without_refill", []string{"-configure", "-capacity", "10"}},
 		{"empty_addr_list", []string{"-addr", " , "}},
+		{"negative_lease_size", []string{"-lease-size", "-1"}},
 	}
 
 	for _, tc := range tests {

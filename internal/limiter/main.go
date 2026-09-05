@@ -41,11 +41,12 @@ func NewLimiterFromConfigWithDeps(req *pb.ConfigureRequest, deps Deps) (Limiter,
 	case pb.Algorithm_TOKEN_BUCKET:
 		cfg := req.GetTokenBucket()
 		if deps.RedisClient != nil {
-			return NewRedisTokenBucketLimiter(
+			return NewRedisTokenBucketLimiterWithLease(
 				deps.RedisClient,
 				cfg.Capacity,
 				cfg.RefillRate,
 				deps.RedisKeyPrefix,
+				cfg.GetLeaseSize(),
 			)
 		}
 		return NewInMemoryTokenBucketLimiter(cfg.Capacity, cfg.RefillRate)
@@ -75,11 +76,12 @@ func NewLimiterFromYAMLConfig(cfg *config.Config, deps Deps) (Limiter, error) {
 	case "redis":
 		switch cfg.Limiter.Algorithm {
 		case "token_bucket":
-			return NewRedisTokenBucketLimiter(
+			return NewRedisTokenBucketLimiterWithLease(
 				deps.RedisClient,
 				cfg.Limiter.TokenBucket.Capacity,
 				cfg.Limiter.TokenBucket.RefillRate,
 				cfg.Redis.KeyPrefix,
+				cfg.Limiter.TokenBucket.LeaseSize,
 			)
 		default:
 			return nil, errors.New("unsupported limiter algorithm: " + cfg.Limiter.Algorithm)

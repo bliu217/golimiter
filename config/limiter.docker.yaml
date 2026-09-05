@@ -19,6 +19,7 @@ limiter:
   token_bucket:
     capacity: 10
     refill_rate: 5
+    lease_size: 0
 
   fixed_window:
     limit: 100

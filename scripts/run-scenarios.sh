@@ -3,15 +3,17 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/run-scenarios.sh <memory|redis-1|redis-3>
+Usage: scripts/run-scenarios.sh <memory|redis-1|redis-3|redis-1-lease|redis-3-lease>
 
 Runs the burst, sustained, cardinality, and saturation scenarios against a
 running limiter. Start the matching topology first:
 
-  memory   go run ./cmd/limiter
-  redis-1  docker compose up --build redis limiter
-  redis-3  docker compose -f docker-compose.yml -f docker-compose.multi.yml \
-             up --build redis limiter-1 limiter-2 limiter-3
+  memory         go run ./cmd/limiter
+  redis-1        docker compose up --build redis limiter
+  redis-3        docker compose -f docker-compose.yml -f docker-compose.multi.yml \
+                   up --build redis limiter-1 limiter-2 limiter-3
+  redis-1-lease  same as redis-1, with -lease-size 10
+  redis-3-lease  same as redis-3, with -lease-size 10
 EOF
 }
 
@@ -24,12 +26,21 @@ TARGET="$1"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+LEASE_SIZE="0"
 case "$TARGET" in
   memory|redis-1)
     ADDR="localhost:50051"
     ;;
   redis-3)
     ADDR="localhost:50051,localhost:50052,localhost:50053"
+    ;;
+  redis-1-lease)
+    ADDR="localhost:50051"
+    LEASE_SIZE="10"
+    ;;
+  redis-3-lease)
+    ADDR="localhost:50051,localhost:50052,localhost:50053"
+    LEASE_SIZE="10"
     ;;
   *)
     echo "run-scenarios: unknown target $TARGET" >&2
@@ -72,7 +83,7 @@ run_sim() {
   local out_dir="$OUTPUT_ROOT/$name"
   mkdir -p "$out_dir"
   echo "=== $TARGET / $name ==="
-  "$SIM_BIN" -addr "$ADDR" -output-dir "$out_dir" "$@"
+  "$SIM_BIN" -addr "$ADDR" -output-dir "$out_dir" -lease-size "$LEASE_SIZE" "$@"
 }
 
 WIDE_CAPACITY="1000000000"
