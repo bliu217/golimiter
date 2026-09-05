@@ -1,0 +1,33 @@
+services:
+  limiter-1:
+    build:
+      context: .
+      target: limiter
+    depends_on:
+      - redis
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./config/limiter.docker.yaml:/app/config/limiter.yaml:ro
+
+  limiter-2:
+    build:
+      context: .
+      target: limiter
+    depends_on:
+      - redis
+    ports:
+      - "50052:50051"
+    volumes:
+      - ./config/limiter.docker.yaml:/app/config/limiter.yaml:ro
+
+  limiter-3:
+    build:
+      context: .
+      target: limiter
+    depends_on:
+      - redis
+    ports:
+      - "50053:50051"
+    volumes:
+      - ./config/limiter.docker.yaml:/app/config/limiter.yaml:ro

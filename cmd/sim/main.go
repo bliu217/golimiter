@@ -37,6 +37,9 @@ type simConfig struct {
 	backoff     time.Duration
 	rate        float64
 	outputDir   string
+	capacity    float64
+	refillRate  float64
+	configure   bool
 }
 
 type requestResult struct {
@@ -61,19 +64,25 @@ type summary struct {
 	minLatency      time.Duration
 	maxLatency      time.Duration
 	totalLatency    time.Duration
+	latencies       []time.Duration
+	capacity        float64
+	refillRate      float64
+	cost            int32
 	latestRemaining int32
 	latestResetTime int64
 }
 
 type jsonSummary struct {
-	Config          jsonConfig     `json:"config"`
-	Totals          jsonTotals     `json:"totals"`
-	ErrorCategories map[string]int `json:"error_categories"`
-	Elapsed         string         `json:"elapsed"`
-	RequestsPerSec  float64        `json:"requests_per_second"`
-	Latency         jsonLatency    `json:"latency"`
-	LatestRemaining int32          `json:"latest_remaining"`
-	LatestResetTime int64          `json:"latest_reset_time"`
+	Config          jsonConfig      `json:"config"`
+	Totals          jsonTotals      `json:"totals"`
+	ErrorCategories map[string]int  `json:"error_categories"`
+	Elapsed         string          `json:"elapsed"`
+	RequestsPerSec  float64         `json:"requests_per_second"`
+	AllowedPerSec   float64         `json:"allowed_per_second"`
+	Enforcement     jsonEnforcement `json:"enforcement"`
+	Latency         jsonLatency     `json:"latency"`
+	LatestRemaining int32           `json:"latest_remaining"`
+	LatestResetTime int64           `json:"latest_reset_time"`
 }
 
 type jsonConfig struct {
@@ -90,6 +99,15 @@ type jsonConfig struct {
 	Backoff     string  `json:"backoff"`
 	Rate        float64 `json:"rate"`
 	OutputDir   string  `json:"output_dir"`
+	Capacity    float64 `json:"capacity"`
+	RefillRate  float64 `json:"refill_rate"`
+	Configure   bool    `json:"configure"`
+}
+
+type jsonEnforcement struct {
+	ExpectedTokens        float64 `json:"expected_tokens"`
+	Oversubscription      float64 `json:"oversubscription"`
+	OversubscriptionRatio float64 `json:"oversubscription_ratio"`
 }
 
 type jsonTotals struct {
@@ -105,9 +123,15 @@ type jsonLatency struct {
 	Min   string  `json:"min"`
 	Avg   string  `json:"avg"`
 	Max   string  `json:"max"`
+	P50   string  `json:"p50"`
+	P95   string  `json:"p95"`
+	P99   string  `json:"p99"`
 	MinMS float64 `json:"min_ms"`
 	AvgMS float64 `json:"avg_ms"`
 	MaxMS float64 `json:"max_ms"`
+	P50MS float64 `json:"p50_ms"`
+	P95MS float64 `json:"p95_ms"`
+	P99MS float64 `json:"p99_ms"`
 }
 
 func main() {
@@ -155,6 +179,9 @@ func parseConfig(args []string, output io.Writer) (simConfig, error) {
 	fs.DurationVar(&cfg.backoff, "backoff", cfg.backoff, "base exponential backoff between retries")
 	fs.Float64Var(&cfg.rate, "rate", cfg.rate, "maximum request dispatch rate per second; 0 means unlimited")
 	fs.StringVar(&cfg.outputDir, "output-dir", cfg.outputDir, "directory for JSON summary files")
+	fs.Float64Var(&cfg.capacity, "capacity", cfg.capacity, "token bucket capacity used for expected-token math and optional Configure")
+	fs.Float64Var(&cfg.refillRate, "refill-rate", cfg.refillRate, "token bucket refill rate used for expected-token math and optional Configure")
+	fs.BoolVar(&cfg.configure, "configure", cfg.configure, "call Configure on every address with -capacity and -refill-rate before Reset")
 
 	if err := fs.Parse(args); err != nil {
 		return simConfig{}, err
@@ -165,6 +192,9 @@ func parseConfig(args []string, output io.Writer) (simConfig, error) {
 func (cfg simConfig) validate() error {
 	if cfg.addr == "" {
 		return errors.New("addr cannot be empty")
+	}
+	if len(cfg.addrs()) == 0 {
+		return errors.New("addr must include at least one host:port")
 	}
 	if cfg.requests < 0 {
 		return errors.New("requests must be non-negative")
@@ -199,30 +229,76 @@ func (cfg simConfig) validate() error {
 	if strings.TrimSpace(cfg.outputDir) == "" {
 		return errors.New("output-dir cannot be empty")
 	}
+	if cfg.capacity < 0 {
+		return errors.New("capacity must be non-negative")
+	}
+	if cfg.refillRate < 0 {
+		return errors.New("refill-rate must be non-negative")
+	}
+	if cfg.configure && cfg.capacity <= 0 {
+		return errors.New("configure requires capacity greater than 0")
+	}
+	if cfg.configure && cfg.refillRate <= 0 {
+		return errors.New("configure requires refill-rate greater than 0")
+	}
 	return nil
 }
 
-func run(ctx context.Context, cfg simConfig, output io.Writer) error {
-	conn, err := grpc.NewClient(cfg.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("create grpc client: %w", err)
+func (cfg simConfig) addrs() []string {
+	parts := strings.Split(cfg.addr, ",")
+	addrs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			addrs = append(addrs, part)
+		}
 	}
-	defer conn.Close()
+	return addrs
+}
 
-	client := pb.NewRateLimiterClient(conn)
-	if cfg.reset {
-		resetCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
-		_, err := client.Reset(resetCtx, &pb.ResetRequest{})
-		cancel()
+func run(ctx context.Context, cfg simConfig, output io.Writer) error {
+	addrs := cfg.addrs()
+	clients := make([]pb.RateLimiterClient, 0, len(addrs))
+	conns := make([]*grpc.ClientConn, 0, len(addrs))
+	for _, addr := range addrs {
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			return fmt.Errorf("reset limiter: %w", err)
+			for _, existing := range conns {
+				_ = existing.Close()
+			}
+			return fmt.Errorf("create grpc client for %s: %w", addr, err)
+		}
+		conns = append(conns, conn)
+		clients = append(clients, pb.NewRateLimiterClient(conn))
+	}
+	defer func() {
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	}()
+
+	if cfg.configure {
+		for i, client := range clients {
+			if err := configureLimiter(ctx, cfg, client); err != nil {
+				return fmt.Errorf("configure limiter %s: %w", addrs[i], err)
+			}
+		}
+	}
+	if cfg.reset {
+		for i, client := range clients {
+			resetCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
+			_, err := client.Reset(resetCtx, &pb.ResetRequest{})
+			cancel()
+			if err != nil {
+				return fmt.Errorf("reset limiter %s: %w", addrs[i], err)
+			}
 		}
 	}
 
 	printConfig(output, cfg)
 	start := time.Now()
-	results := runRequests(ctx, cfg, client)
-	report := summarize(results, time.Since(start))
+	results := runRequests(ctx, cfg, clients)
+	report := summarize(results, time.Since(start), cfg)
 	printSummary(output, report)
 	summaryPath, err := writeJSONSummary(cfg, report, time.Now())
 	if err != nil {
@@ -232,7 +308,32 @@ func run(ctx context.Context, cfg simConfig, output io.Writer) error {
 	return nil
 }
 
-func runRequests(ctx context.Context, cfg simConfig, client pb.RateLimiterClient) []requestResult {
+func configureLimiter(ctx context.Context, cfg simConfig, client pb.RateLimiterClient) error {
+	configureCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
+	defer cancel()
+	resp, err := client.Configure(configureCtx, &pb.ConfigureRequest{
+		Algorithm: pb.Algorithm_TOKEN_BUCKET,
+		Config: &pb.ConfigureRequest_TokenBucket{
+			TokenBucket: &pb.TokenBucketConfig{
+				Capacity:   cfg.capacity,
+				RefillRate: cfg.refillRate,
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.GetSuccess() {
+		message := resp.GetMessage()
+		if message == "" {
+			message = "configure returned success=false"
+		}
+		return errors.New(message)
+	}
+	return nil
+}
+
+func runRequests(ctx context.Context, cfg simConfig, clients []pb.RateLimiterClient) []requestResult {
 	jobs := make(chan int)
 	results := make(chan requestResult, cfg.requests)
 
@@ -242,6 +343,7 @@ func runRequests(ctx context.Context, cfg simConfig, client pb.RateLimiterClient
 		go func() {
 			defer wg.Done()
 			for requestID := range jobs {
+				client := clients[requestID%len(clients)]
 				results <- sendAllow(ctx, cfg, client, requestID)
 			}
 		}()
@@ -362,15 +464,22 @@ func requestKey(base string, keyCount int, requestID int) string {
 	return fmt.Sprintf("%s-%d", base, requestID%keyCount)
 }
 
-func summarize(results []requestResult, elapsed time.Duration) summary {
+func summarize(results []requestResult, elapsed time.Duration, cfg simConfig) summary {
 	report := summary{
 		total:           len(results),
 		elapsed:         elapsed,
 		errorCategories: make(map[string]int),
+		latencies:       make([]time.Duration, 0, len(results)),
+		capacity:        cfg.capacity,
+		refillRate:      cfg.refillRate,
+		cost:            cfg.cost,
 	}
 	for _, result := range results {
 		report.add(result)
 	}
+	sort.Slice(report.latencies, func(i, j int) bool {
+		return report.latencies[i] < report.latencies[j]
+	})
 	return report
 }
 
@@ -397,6 +506,7 @@ func (s *summary) add(result requestResult) {
 			s.maxLatency = result.latency
 		}
 		s.totalLatency += result.latency
+		s.latencies = append(s.latencies, result.latency)
 	}
 
 	if result.err == nil {
@@ -419,6 +529,74 @@ func (s summary) requestsPerSecond() float64 {
 	return float64(s.total) / s.elapsed.Seconds()
 }
 
+func (s summary) allowedPerSecond() float64 {
+	if s.elapsed <= 0 {
+		return 0
+	}
+	return float64(s.allowed) / s.elapsed.Seconds()
+}
+
+func (s summary) expectedTokens() float64 {
+	if s.capacity == 0 && s.refillRate == 0 {
+		return 0
+	}
+	return s.capacity + s.refillRate*s.elapsed.Seconds()
+}
+
+func (s summary) oversubscription() float64 {
+	if s.capacity == 0 && s.refillRate == 0 {
+		return 0
+	}
+	consumed := float64(s.allowed) * float64(s.cost)
+	delta := consumed - s.expectedTokens()
+	if delta < 0 {
+		return 0
+	}
+	return delta
+}
+
+func (s summary) oversubscriptionRatio() float64 {
+	expected := s.expectedTokens()
+	if expected <= 0 {
+		return 0
+	}
+	return s.oversubscription() / expected
+}
+
+func (s summary) p50Latency() time.Duration {
+	return percentile(s.latencies, 50)
+}
+
+func (s summary) p95Latency() time.Duration {
+	return percentile(s.latencies, 95)
+}
+
+func (s summary) p99Latency() time.Duration {
+	return percentile(s.latencies, 99)
+}
+
+// percentile uses nearest-rank on a pre-sorted latency slice.
+func percentile(sorted []time.Duration, p float64) time.Duration {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if p <= 0 {
+		return sorted[0]
+	}
+	if p >= 100 {
+		return sorted[len(sorted)-1]
+	}
+	rank := int(math.Ceil(p / 100 * float64(len(sorted))))
+	idx := rank - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
+
 func printConfig(output io.Writer, cfg simConfig) {
 	fmt.Fprintf(output, "simulator config\n")
 	fmt.Fprintf(output, "  addr: %s\n", cfg.addr)
@@ -434,6 +612,9 @@ func printConfig(output io.Writer, cfg simConfig) {
 	fmt.Fprintf(output, "  backoff: %s\n", cfg.backoff)
 	fmt.Fprintf(output, "  rate: %.2f\n", cfg.rate)
 	fmt.Fprintf(output, "  output_dir: %s\n", cfg.outputDir)
+	fmt.Fprintf(output, "  capacity: %.6g\n", cfg.capacity)
+	fmt.Fprintf(output, "  refill_rate: %.6g\n", cfg.refillRate)
+	fmt.Fprintf(output, "  configure: %t\n", cfg.configure)
 }
 
 func printSummary(output io.Writer, report summary) {
@@ -452,8 +633,15 @@ func printSummary(output io.Writer, report summary) {
 	}
 	fmt.Fprintf(output, "  elapsed: %s\n", report.elapsed.Round(time.Millisecond))
 	fmt.Fprintf(output, "  requests_per_second: %.2f\n", roundFloat(report.requestsPerSecond(), 2))
+	fmt.Fprintf(output, "  allowed_per_second: %.2f\n", roundFloat(report.allowedPerSecond(), 2))
+	fmt.Fprintf(output, "  expected_tokens: %.4f\n", roundFloat(report.expectedTokens(), 4))
+	fmt.Fprintf(output, "  oversubscription: %.4f\n", roundFloat(report.oversubscription(), 4))
+	fmt.Fprintf(output, "  oversubscription_ratio: %.4f\n", roundFloat(report.oversubscriptionRatio(), 4))
 	fmt.Fprintf(output, "  min_latency: %s\n", report.minLatency.Round(time.Microsecond))
 	fmt.Fprintf(output, "  avg_latency: %s\n", report.avgLatency().Round(time.Microsecond))
+	fmt.Fprintf(output, "  p50_latency: %s\n", report.p50Latency().Round(time.Microsecond))
+	fmt.Fprintf(output, "  p95_latency: %s\n", report.p95Latency().Round(time.Microsecond))
+	fmt.Fprintf(output, "  p99_latency: %s\n", report.p99Latency().Round(time.Microsecond))
 	fmt.Fprintf(output, "  max_latency: %s\n", report.maxLatency.Round(time.Microsecond))
 	fmt.Fprintf(output, "  latest_remaining: %d\n", report.latestRemaining)
 	fmt.Fprintf(output, "  latest_reset_time: %d\n", report.latestResetTime)
@@ -529,6 +717,9 @@ func newJSONSummary(cfg simConfig, report summary) jsonSummary {
 			Backoff:     cfg.backoff.String(),
 			Rate:        cfg.rate,
 			OutputDir:   cfg.outputDir,
+			Capacity:    cfg.capacity,
+			RefillRate:  cfg.refillRate,
+			Configure:   cfg.configure,
 		},
 		Totals: jsonTotals{
 			Requests:      report.total,
@@ -541,13 +732,25 @@ func newJSONSummary(cfg simConfig, report summary) jsonSummary {
 		ErrorCategories: copyStringIntMap(report.errorCategories),
 		Elapsed:         report.elapsed.String(),
 		RequestsPerSec:  roundFloat(report.requestsPerSecond(), 2),
+		AllowedPerSec:   roundFloat(report.allowedPerSecond(), 2),
+		Enforcement: jsonEnforcement{
+			ExpectedTokens:        roundFloat(report.expectedTokens(), 4),
+			Oversubscription:      roundFloat(report.oversubscription(), 4),
+			OversubscriptionRatio: roundFloat(report.oversubscriptionRatio(), 4),
+		},
 		Latency: jsonLatency{
 			Min:   report.minLatency.String(),
 			Avg:   report.avgLatency().String(),
 			Max:   report.maxLatency.String(),
+			P50:   report.p50Latency().String(),
+			P95:   report.p95Latency().String(),
+			P99:   report.p99Latency().String(),
 			MinMS: roundFloat(durationMilliseconds(report.minLatency), 3),
 			AvgMS: roundFloat(durationMilliseconds(report.avgLatency()), 3),
 			MaxMS: roundFloat(durationMilliseconds(report.maxLatency), 3),
+			P50MS: roundFloat(durationMilliseconds(report.p50Latency()), 3),
+			P95MS: roundFloat(durationMilliseconds(report.p95Latency()), 3),
+			P99MS: roundFloat(durationMilliseconds(report.p99Latency()), 3),
 		},
 		LatestRemaining: report.latestRemaining,
 		LatestResetTime: report.latestResetTime,

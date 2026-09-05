@@ -14,3 +14,12 @@ test-integration:
 
 clean-sim-summaries:
 	@cd .. && rm -f cmd/sim/summaries/*.json
+
+scenarios-memory:
+	@cd .. && ./scripts/run-scenarios.sh memory
+
+scenarios-redis-1:
+	@cd .. && ./scripts/run-scenarios.sh redis-1
+
+scenarios-redis-3:
+	@cd .. && ./scripts/run-scenarios.sh redis-3

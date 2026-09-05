@@ -25,7 +25,7 @@ go run ./cmd/sim [flags]
 
 Flags:
 
-- `-addr`: rate limiter gRPC address. Default: `localhost:50051`.
+- `-addr`: rate limiter gRPC address, or a comma-separated list for round-robin across replicas. Default: `localhost:50051`.
 - `-requests`: total number of `Allow` requests to send. Default: `100`.
 - `-concurrency`: number of concurrent workers. Default: `10`.
 - `-key`: base request key. Default: `user`.
@@ -33,11 +33,14 @@ Flags:
 - `-resource`: resource name for each request. Default: `default`.
 - `-cost`: request cost. Default: `1`.
 - `-timeout`: per-RPC timeout. Default: `2s`.
-- `-reset`: call the limiter `Reset` RPC before sending traffic.
+- `-reset`: call the limiter `Reset` RPC on every address before sending traffic.
 - `-retries`: retry attempts per request after the initial attempt. Default: `0`.
 - `-backoff`: base exponential backoff between retries. Default: `50ms`.
 - `-rate`: maximum request dispatch rate per second. Default: `0`, which means unlimited.
 - `-output-dir`: directory for JSON summary files. Default: `cmd/sim/summaries`.
+- `-capacity`: token-bucket capacity used for expected-token math and optional `Configure`. Default: `0`.
+- `-refill-rate`: token-bucket refill rate used for expected-token math and optional `Configure`. Default: `0`.
+- `-configure`: call `Configure` on every address with `-capacity` and `-refill-rate` before `Reset`.
 
 When `-keys` is greater than `1`, request keys are generated as
 `<key>-<n>`. For example, `-key user -keys 3` cycles through `user-0`,
@@ -87,6 +90,13 @@ Write JSON summaries to a custom directory:
 go run ./cmd/sim -addr localhost:50051 -requests 100 -output-dir /tmp/golimiter-summaries
 ```
 
+Configure a tight bucket, then burst one key across three replicas:
+
+```sh
+go run ./cmd/sim -addr localhost:50051,localhost:50052,localhost:50053 \
+  -configure -capacity 10 -refill-rate 0.001 -requests 200 -concurrency 50 -reset
+```
+
 ## Output
 
 The simulator prints the run configuration first, then a summary:
@@ -101,17 +111,22 @@ The simulator prints the run configuration first, then a summary:
   `unavailable`, `deadline_exceeded`, `canceled`, `internal`, `unknown`, and
   `non_grpc_error`.
 - `elapsed`: wall-clock runtime.
-- `requests_per_second`: attempted requests divided by elapsed time.
-- `min_latency`, `avg_latency`, `max_latency`: observed RPC latency.
+- `requests_per_second`: attempted requests divided by elapsed time (offered load).
+- `allowed_per_second`: allowed responses divided by elapsed time.
+- `expected_tokens`: `capacity + refill_rate * elapsed` when those flags are set.
+- `oversubscription`: extra tokens granted beyond `expected_tokens`.
+- `oversubscription_ratio`: `oversubscription / expected_tokens`.
+- `min_latency`, `avg_latency`, `p50_latency`, `p95_latency`, `p99_latency`, `max_latency`: observed RPC latency.
 - `latest_remaining`: latest `remaining` value returned by the limiter.
 - `latest_reset_time`: latest `reset_time` value returned by the limiter.
 
-Use `allowed` and `denied` to confirm rate-limit behavior, and use the latency
-numbers as a quick signal while developing the limiter service locally.
+Use `allowed` and `denied` to confirm rate-limit behavior, and use percentiles plus
+oversubscription as the correctness and tail-latency signals.
 
 ## JSON Summaries
 
 Each run writes a timestamped JSON summary to `-output-dir`. The default
 directory is `cmd/sim/summaries`, which is ignored by git. Summary files include
 the run config, request and retry totals, error category counts, elapsed time,
-requests per second, latency stats, and the latest rate-limit metadata.
+offered and allowed request rates, expected-token enforcement stats, latency
+percentiles, and the latest rate-limit metadata.

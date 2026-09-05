@@ -20,6 +20,9 @@ profile.cov
 # Simulator run summaries
 cmd/sim/summaries/
 
+# Scenario JSON dumps (README Local testing metrics is the published table)
+benchmarks/results/**/*.json
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 

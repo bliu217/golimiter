@@ -67,6 +67,8 @@ func TestRun_InProcessMemoryServerEndToEnd(t *testing.T) {
 		backoff:     time.Millisecond,
 		rate:        0,
 		outputDir:   outputDir,
+		capacity:    2,
+		refillRate:  0.000001,
 	}
 
 	if err := run(context.Background(), cfg, io.Discard); err != nil {
@@ -85,5 +87,8 @@ func TestRun_InProcessMemoryServerEndToEnd(t *testing.T) {
 	}
 	if summary.Totals.Errors != 0 {
 		t.Fatalf("errors = %d, want 0", summary.Totals.Errors)
+	}
+	if summary.Enforcement.Oversubscription != 0 {
+		t.Fatalf("oversubscription = %v, want 0", summary.Enforcement.Oversubscription)
 	}
 }

@@ -47,7 +47,7 @@ func TestSummarize(t *testing.T) {
 		{err: errors.New("rpc failed"), errorCategory: "non_grpc_error", latency: 30 * time.Millisecond, attempts: 3},
 	}
 
-	report := summarize(results, 2*time.Second)
+	report := summarize(results, 2*time.Second, simConfig{cost: 1})
 	if report.total != 3 {
 		t.Fatalf("total = %d, want 3", report.total)
 	}
@@ -87,6 +87,76 @@ func TestSummarize(t *testing.T) {
 	if report.latestResetTime != 1 {
 		t.Fatalf("latestResetTime = %d, want 1", report.latestResetTime)
 	}
+	if report.p50Latency() != 20*time.Millisecond {
+		t.Fatalf("p50Latency = %s, want 20ms", report.p50Latency())
+	}
+	if report.p95Latency() != 30*time.Millisecond {
+		t.Fatalf("p95Latency = %s, want 30ms", report.p95Latency())
+	}
+	if report.p99Latency() != 30*time.Millisecond {
+		t.Fatalf("p99Latency = %s, want 30ms", report.p99Latency())
+	}
+	if got := report.allowedPerSecond(); got != 0.5 {
+		t.Fatalf("allowedPerSecond = %v, want 0.5", got)
+	}
+}
+
+func TestPercentileNearestRank(t *testing.T) {
+	latencies := make([]time.Duration, 10)
+	for i := range latencies {
+		latencies[i] = time.Duration(i+1) * time.Millisecond
+	}
+	if got := percentile(latencies, 50); got != 5*time.Millisecond {
+		t.Fatalf("p50 = %s, want 5ms", got)
+	}
+	if got := percentile(latencies, 95); got != 10*time.Millisecond {
+		t.Fatalf("p95 = %s, want 10ms", got)
+	}
+	if got := percentile(latencies, 99); got != 10*time.Millisecond {
+		t.Fatalf("p99 = %s, want 10ms", got)
+	}
+	if got := percentile(nil, 50); got != 0 {
+		t.Fatalf("empty p50 = %s, want 0", got)
+	}
+}
+
+func TestOversubscription(t *testing.T) {
+	results := make([]requestResult, 12)
+	for i := range results {
+		results[i] = requestResult{allowed: true, latency: time.Millisecond, attempts: 1}
+	}
+	report := summarize(results, 0, simConfig{capacity: 10, refillRate: 0, cost: 1})
+	if got := report.expectedTokens(); got != 10 {
+		t.Fatalf("expectedTokens = %v, want 10", got)
+	}
+	if got := report.oversubscription(); got != 2 {
+		t.Fatalf("oversubscription = %v, want 2", got)
+	}
+	if got := report.oversubscriptionRatio(); got != 0.2 {
+		t.Fatalf("oversubscriptionRatio = %v, want 0.2", got)
+	}
+}
+
+func TestOversubscriptionSkippedWithoutCapacity(t *testing.T) {
+	results := []requestResult{{allowed: true, latency: time.Millisecond, attempts: 1}}
+	report := summarize(results, time.Second, simConfig{cost: 1})
+	if report.expectedTokens() != 0 || report.oversubscription() != 0 {
+		t.Fatalf("expectedTokens/oversubscription = %v/%v, want 0/0", report.expectedTokens(), report.oversubscription())
+	}
+}
+
+func TestAddrsParsesCommaSeparatedList(t *testing.T) {
+	cfg := simConfig{addr: "localhost:50051, localhost:50052,localhost:50053"}
+	got := cfg.addrs()
+	want := []string{"localhost:50051", "localhost:50052", "localhost:50053"}
+	if len(got) != len(want) {
+		t.Fatalf("addrs() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("addrs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
 }
 
 func TestParseConfig(t *testing.T) {
@@ -104,6 +174,9 @@ func TestParseConfig(t *testing.T) {
 		"-backoff", "25ms",
 		"-rate", "12.5",
 		"-output-dir", "tmp/summaries",
+		"-capacity", "10",
+		"-refill-rate", "5",
+		"-configure",
 	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseConfig: %v", err)
@@ -138,6 +211,15 @@ func TestParseConfig(t *testing.T) {
 	if cfg.outputDir != "tmp/summaries" {
 		t.Fatalf("outputDir = %q, want tmp/summaries", cfg.outputDir)
 	}
+	if cfg.capacity != 10 {
+		t.Fatalf("capacity = %v, want 10", cfg.capacity)
+	}
+	if cfg.refillRate != 5 {
+		t.Fatalf("refillRate = %v, want 5", cfg.refillRate)
+	}
+	if !cfg.configure {
+		t.Fatal("configure = false, want true")
+	}
 }
 
 func TestParseConfigRejectsInvalidValues(t *testing.T) {
@@ -154,6 +236,11 @@ func TestParseConfigRejectsInvalidValues(t *testing.T) {
 		{"zero_backoff", []string{"-backoff", "0s"}},
 		{"negative_rate", []string{"-rate", "-1"}},
 		{"empty_output_dir", []string{"-output-dir", ""}},
+		{"negative_capacity", []string{"-capacity", "-1"}},
+		{"negative_refill_rate", []string{"-refill-rate", "-1"}},
+		{"configure_without_capacity", []string{"-configure", "-refill-rate", "5"}},
+		{"configure_without_refill", []string{"-configure", "-capacity", "10"}},
+		{"empty_addr_list", []string{"-addr", " , "}},
 	}
 
 	for _, tc := range tests {
@@ -301,7 +388,7 @@ func TestWriteJSONSummary(t *testing.T) {
 	report := summarize([]requestResult{
 		{allowed: true, attempts: 1, latency: 10 * time.Millisecond},
 		{err: status.Error(codes.Unavailable, "down"), errorCategory: "unavailable", attempts: 3, latency: 20 * time.Millisecond},
-	}, 2*time.Second)
+	}, 2*time.Second, cfg)
 
 	path, err := writeJSONSummary(cfg, report, time.Date(2026, 6, 5, 14, 55, 0, 0, time.UTC))
 	if err != nil {
@@ -328,6 +415,35 @@ func TestWriteJSONSummary(t *testing.T) {
 	if got.ErrorCategories["unavailable"] != 1 {
 		t.Fatalf("unavailable errors = %d, want 1", got.ErrorCategories["unavailable"])
 	}
+	if got.AllowedPerSec != 0.5 {
+		t.Fatalf("allowed_per_second = %v, want 0.5", got.AllowedPerSec)
+	}
+	if got.Latency.P50MS != 10 {
+		t.Fatalf("p50_ms = %v, want 10", got.Latency.P50MS)
+	}
+}
+
+func TestRunRequestsRoundRobinsClients(t *testing.T) {
+	first := &fakeRateLimiterClient{response: &pb.AllowResponse{Allowed: true}}
+	second := &fakeRateLimiterClient{response: &pb.AllowResponse{Allowed: true}}
+	cfg := simConfig{
+		requests:    4,
+		concurrency: 1,
+		key:         "user",
+		keys:        1,
+		resource:    "api",
+		cost:        1,
+		timeout:     time.Second,
+		backoff:     time.Millisecond,
+	}
+
+	results := runRequests(context.Background(), cfg, []pb.RateLimiterClient{first, second})
+	if len(results) != 4 {
+		t.Fatalf("results = %d, want 4", len(results))
+	}
+	if first.calls != 2 || second.calls != 2 {
+		t.Fatalf("client calls = %d/%d, want 2/2", first.calls, second.calls)
+	}
 }
 
 type fakeRateLimiterClient struct {
@@ -347,4 +463,20 @@ func (f *fakeRateLimiterClient) Allow(
 		return nil, status.Error(codes.Unavailable, "temporary outage")
 	}
 	return f.response, nil
+}
+
+func (f *fakeRateLimiterClient) Configure(
+	ctx context.Context,
+	in *pb.ConfigureRequest,
+	opts ...grpc.CallOption,
+) (*pb.ConfigureResponse, error) {
+	return &pb.ConfigureResponse{Success: true, Message: "ok"}, nil
+}
+
+func (f *fakeRateLimiterClient) Reset(
+	ctx context.Context,
+	in *pb.ResetRequest,
+	opts ...grpc.CallOption,
+) (*pb.ResetResponse, error) {
+	return &pb.ResetResponse{Success: true}, nil
 }
