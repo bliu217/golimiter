@@ -29,3 +29,9 @@ scenarios-redis-1-lease:
 
 scenarios-redis-3-lease:
 	@cd .. && ./scripts/run-scenarios.sh redis-3-lease
+
+scenarios-kind:
+	@cd .. && ./scripts/run-scenarios.sh kind
+
+scenarios-kind-lease:
+	@cd .. && ./scripts/run-scenarios.sh kind-lease

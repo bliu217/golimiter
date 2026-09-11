@@ -113,7 +113,14 @@ kubectl apply -k deploy/k8s/overlays/kind
 kubectl -n golimiter port-forward svc/limiter 50051:50051
 ```
 
-Then run the simulator against the forwarded Service (one address; the Service spreads connections across ready limiter pods):
+Then run the same benchmark suite used for Compose (waits for Deployment + Redis, then port-forwards the Service if needed):
+
+```sh
+./scripts/run-scenarios.sh kind
+./scripts/run-scenarios.sh kind-lease
+```
+
+A one-shot smoke test:
 
 ```sh
 go run ./cmd/sim -addr localhost:50051 -requests 100 -concurrency 10 -reset
@@ -123,7 +130,7 @@ Object glossary, EKS overlay notes, and `kubectl` cheatsheet: [`deploy/k8s/READM
 
 ## Local testing metrics
 
-These numbers come from `scripts/run-scenarios.sh` against the same four scenarios on three topologies. Collected 2026-09-05 UTC on WSL2 (`AMD Ryzen 9 7900X`, 24 threads).
+These numbers come from `scripts/run-scenarios.sh` against the same four scenarios on Compose and Kind. Compose rows: 2026-09-05 UTC. Kind rows: 2026-09-11 UTC. Same machine: WSL2 (`AMD Ryzen 9 7900X`, 24 threads). Kind `kind` is the fair compare to `redis-3` (three limiter processes, one Redis); `kind` goes through the ClusterIP Service + port-forward (one gRPC connection), while `redis-3` round-robins three host ports.
 
 ```mermaid
 flowchart LR
@@ -142,6 +149,15 @@ flowchart LR
     n2 --> redisB
     n3 --> redisB
   end
+  subgraph kindTopo [kind]
+    simK[cmd/sim] --> svcK[Service_limiter]
+    svcK --> k1[limiter]
+    svcK --> k2[limiter]
+    svcK --> k3[limiter]
+    k1 --> redisC[(Redis Lua)]
+    k2 --> redisC
+    k3 --> redisC
+  end
 ```
 
 Two experiment classes:
@@ -149,15 +165,16 @@ Two experiment classes:
 - **Correctness** uses a tight token bucket. `burst-hotkey` sets `capacity=10` and `refill_rate=0.001`, then sends 200 concurrent Allows on one key. `sustained-limit` sets `capacity=10` and `refill_rate=5`, then offers 25 RPS for 300 requests. Expected tokens are `capacity + refill_rate * elapsed`; oversubscription is tokens granted above that cap.
 - **Performance** uses a wide-open bucket so the limiter is not the bottleneck. `cardinality-hot` vs `cardinality-wide` compares one key to 1000 keys at 2000 requests / 100 workers. `saturation` sweeps concurrency 1, 10, 50, 100, 200 with 5000 Allows.
 
-Reproduce after starting the matching topology (`go run ./cmd/limiter` for memory, Compose for Redis):
+Reproduce after starting the matching topology (`go run ./cmd/limiter` for memory, Compose for Redis, Kind cluster for `kind`):
 
 ```sh
 ./scripts/run-scenarios.sh memory
 ./scripts/run-scenarios.sh redis-1
 ./scripts/run-scenarios.sh redis-3
+./scripts/run-scenarios.sh kind
 ```
 
-JSON dumps land under `benchmarks/results/<target>/`. Make targets: `make -C scripts scenarios-memory`, `scenarios-redis-1`, `scenarios-redis-3`, `scenarios-redis-1-lease`, `scenarios-redis-3-lease`.
+JSON dumps land under `benchmarks/results/<target>/`. Make targets: `make -C scripts scenarios-memory`, `scenarios-redis-1`, `scenarios-redis-3`, `scenarios-redis-1-lease`, `scenarios-redis-3-lease`, `scenarios-kind`, `scenarios-kind-lease`.
 
 ### Correctness and cardinality
 
@@ -175,10 +192,16 @@ JSON dumps land under `benchmarks/results/<target>/`. Make targets: `make -C scr
 | redis-3 | sustained-limit | 66 | 234 | 0 | 5.50 | 70.0087 | 0.0000 | 0.882 | 1.363 | 25.00 |
 | redis-3 | cardinality-hot | 2000 | 0 | 0 | 14870.72 | — | 0.0000 | 3.259 | 45.900 | 14870.72 |
 | redis-3 | cardinality-wide | 2000 | 0 | 0 | 27887.49 | — | 0.0000 | 3.382 | 6.473 | 27887.49 |
+| kind | burst-hotkey | 10 | 190 | 0 | 102.15 | 10.0001 | 0.0000 | 7.393 | 32.874 | 2042.97 |
+| kind | sustained-limit | 69 | 231 | 0 | 5.75 | 70.0205 | 0.0000 | 3.275 | 6.567 | 24.99 |
+| kind | cardinality-hot | 2000 | 0 | 0 | 2861.87 | — | 0.0000 | 17.836 | 86.675 | 2861.87 |
+| kind | cardinality-wide | 2000 | 0 | 0 | 2678.48 | — | 0.0000 | 42.505 | 90.589 | 2678.48 |
 
 Wide-open cardinality rows omit expected-token magnitude; the bucket is `1e9` capacity / refill so the cap is not the interesting number. Oversubscription stayed 0.
 
-Hot-key burst of 200 concurrent Allows granted exactly 10 tokens on every topology, including three limiter processes sharing Redis. Under 25 RPS offered load against a 5 token/s bucket, allow-rate stayed at 5.50–5.75/s (initial burst of 10 tokens plus refill) with 0 oversubscription.
+Hot-key burst of 200 concurrent Allows granted exactly 10 tokens on every topology, including three limiter processes sharing Redis (Compose and Kind). Under 25 RPS offered load against a 5 token/s bucket, allow-rate stayed at 5.50–5.75/s (initial burst of 10 tokens plus refill) with 0 oversubscription.
+
+Kind matches redis-3 on **correctness** (burst 10/190, sustained ~5.75 allow/s, zero oversub) and is slower on **throughput**: cardinality-hot is ~2.9k RPS vs ~14.9k on redis-3, and p99 jumps to ~87ms vs ~46ms. That gap is mostly the extra hop (laptop → port-forward → Kind node → Service → pod) plus one multiplexed gRPC connection to the Service instead of client-side round-robin across three Compose ports.
 
 ### Saturation
 
@@ -201,12 +224,17 @@ Wide-open bucket, 5000 Allows, no errors in this sweep. p99 is the useful signal
 | redis-3 | 50 | 29939.13 | 1.613 | 2.758 | 3.523 |
 | redis-3 | 100 | 29184.41 | 3.280 | 4.953 | 6.311 |
 | redis-3 | 200 | 32686.82 | 5.769 | 10.170 | 19.815 |
+| kind | 1 | 408.03 | 2.373 | 3.842 | 8.396 |
+| kind | 10 | 1721.05 | 2.908 | 43.033 | 46.761 |
+| kind | 50 | 3026.58 | 5.664 | 76.590 | 80.274 |
+| kind | 100 | 3072.48 | 16.535 | 87.551 | 91.700 |
+| kind | 200 | 3101.03 | 59.251 | 98.278 | 101.526 |
 
-In-memory Allow peaked at about 78k RPS (p99 5.7ms at 200 workers). Redis Lua on one node peaked at about 41k RPS (p99 8.2ms). Three replicas sharing Redis peaked at about 33k RPS; p99 stayed under 3ms through 50 workers and crossed 10ms at 200. On redis-3, a hot key at 100 workers had a much worse tail (p99 45.9ms) than 1000 keys (p99 6.5ms).
+In-memory Allow peaked at about 78k RPS (p99 5.7ms at 200 workers). Redis Lua on one node peaked at about 41k RPS (p99 8.2ms). Three replicas sharing Redis peaked at about 33k RPS; p99 stayed under 3ms through 50 workers and crossed 10ms at 200. On redis-3, a hot key at 100 workers had a much worse tail (p99 45.9ms) than 1000 keys (p99 6.5ms). Kind through the Service plateaued around **3.1k RPS** (p99 ~98ms at 200 workers): extra latency from port-forward and a single HTTP/2 connection, not a change in Redis token-bucket math.
 
 ### Token lease cache (`lease_size=10`)
 
-Same scenarios, same machine, with each limiter node checking out 10 tokens from Redis per miss and serving later Allows from a local pocket. Enable it with `-lease-size 10` on Configure (the scenario targets `redis-1-lease` and `redis-3-lease`).
+Same scenarios, same machine, with each limiter node checking out 10 tokens from Redis per miss and serving later Allows from a local pocket. Enable it with `-lease-size 10` on Configure (the scenario targets `redis-1-lease`, `redis-3-lease`, and `kind-lease`).
 
 Redis still deducts the checkout atomically, so the global jar cannot be overdrawn. Nodes can hog unused pocket tokens, which is why a tight bucket does not get much faster, and why allow-rate on `sustained-limit` sits a little further under the expected refill.
 
@@ -220,8 +248,12 @@ Redis still deducts the checkout atomically, so the global jar cannot be overdra
 | redis-3-lease | sustained-limit | 64 | 236 | 0 | 0.0000 | 0.867 | 1.317 | 25.00 |
 | redis-3-lease | cardinality-hot | 2000 | 0 | 0 | 0.0000 | 1.325 | 3.780 | 61725.43 |
 | redis-3-lease | cardinality-wide | 2000 | 0 | 0 | 0.0000 | 3.497 | 49.927 | 16978.59 |
+| kind-lease | burst-hotkey | 10 | 190 | 0 | 0.0000 | 3.532 | 5.406 | 11360.00 |
+| kind-lease | sustained-limit | 69 | 231 | 0 | 0.0000 | 2.909 | 3.998 | 24.99 |
+| kind-lease | cardinality-hot | 2000 | 0 | 0 | 0.0000 | 6.867 | 80.034 | 4933.66 |
+| kind-lease | cardinality-wide | 2000 | 0 | 0 | 0.0000 | 12.300 | 53.680 | 4850.81 |
 
-Burst oversubscription stayed 0 on one and three replicas. The hot-key win is the point of the cache: redis-3 cardinality-hot went from **14.9k RPS / p99 45.9ms** without leases to **61.7k RPS / p99 3.8ms**. Wide cardinality on three nodes got worse (p99 50ms) because 1000 keys still miss to Redis; the pocket only helps when the same key is reused.
+Burst oversubscription stayed 0 on one and three replicas. The hot-key win is the point of the cache: redis-3 cardinality-hot went from **14.9k RPS / p99 45.9ms** without leases to **61.7k RPS / p99 3.8ms**. Wide cardinality on three nodes got worse (p99 50ms) because 1000 keys still miss to Redis; the pocket only helps when the same key is reused. Kind saw the same correctness (burst 10/190, 0 oversub) and a smaller speedup: cardinality-hot **2.9k → 4.9k RPS**, burst p99 **33ms → 5.4ms**. Port-forward still caps the ceiling versus Compose.
 
 | target | concurrency | offered RPS | p50 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|
@@ -235,10 +267,16 @@ Burst oversubscription stayed 0 on one and three replicas. The hot-key win is th
 | redis-3-lease | 50 | 51780.12 | 0.834 | 2.160 | 2.877 |
 | redis-3-lease | 100 | 71992.41 | 1.131 | 3.257 | 4.988 |
 | redis-3-lease | 200 | 84992.58 | 1.840 | 5.768 | 8.768 |
+| kind-lease | 1 | 512.31 | 1.862 | 3.209 | 8.382 |
+| kind-lease | 10 | 3928.54 | 2.412 | 4.825 | 8.891 |
+| kind-lease | 50 | 5420.11 | 3.823 | 46.226 | 75.253 |
+| kind-lease | 100 | 5238.38 | 6.915 | 79.245 | 87.446 |
+| kind-lease | 200 | 5555.93 | 36.577 | 139.363 | 300.992 |
 
-Single-node Redis saturation is similar at the top (~43k vs ~41k RPS) with a better p50 at low concurrency (0.33ms vs 0.50ms) and a worse tail at 200 workers. Three replicas plus leases peaked at **~85k RPS, p99 5.8ms**, above the in-memory single-process run, because most Allows never wait on Redis.
+Single-node Redis saturation is similar at the top (~43k vs ~41k RPS) with a better p50 at low concurrency (0.33ms vs 0.50ms) and a worse tail at 200 workers. Three replicas plus leases peaked at **~85k RPS, p99 5.8ms**, above the in-memory single-process run, because most Allows never wait on Redis. Kind-lease peaked around **5.6k RPS** (vs ~3.1k without leases); p99 at 10 workers dropped from 43ms to 4.8ms, then the tail grew again at 50+ workers on the single port-forward connection.
 
 ```sh
 ./scripts/run-scenarios.sh redis-1-lease
 ./scripts/run-scenarios.sh redis-3-lease
+./scripts/run-scenarios.sh kind-lease
 ```

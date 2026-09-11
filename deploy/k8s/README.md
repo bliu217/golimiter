@@ -44,19 +44,26 @@ kubectl -n golimiter rollout status statefulset/redis
 
 Kind nodes do not see laptop Docker images until you `kind load`.
 
-Port-forward the **Service** (not a single pod) so the laptop hits the ClusterIP balancer:
+The script waits for `deployment/limiter` and `statefulset/redis` to roll out and for the Service to have endpoints, then port-forwards `svc/limiter` if `localhost:50051` is not already open.
+
+```sh
+./scripts/run-scenarios.sh kind
+./scripts/run-scenarios.sh kind-lease
+```
+
+Port-forward the **Service** yourself for a one-shot sim:
 
 ```sh
 kubectl -n golimiter port-forward svc/limiter 50051:50051
 go run ./cmd/sim -addr localhost:50051 -requests 100 -concurrency 10 -reset
 ```
 
-In-cluster sim Job (delete first if it already ran):
+The in-cluster sim Job uses an init container (`nc -z limiter 50051`) so it does not fire until the Service has a backend. Re-run:
 
 ```sh
 kubectl -n golimiter delete job sim --ignore-not-found
 kubectl apply -k deploy/k8s/overlays/kind
-kubectl -n golimiter logs job/sim
+kubectl -n golimiter logs job/sim -f
 ```
 
 Cheatsheet:

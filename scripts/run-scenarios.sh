@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/run-scenarios.sh <memory|redis-1|redis-3|redis-1-lease|redis-3-lease>
+Usage: scripts/run-scenarios.sh <memory|redis-1|redis-3|redis-1-lease|redis-3-lease|kind|kind-lease>
 
 Runs the burst, sustained, cardinality, and saturation scenarios against a
 running limiter. Start the matching topology first:
@@ -14,6 +14,8 @@ running limiter. Start the matching topology first:
                    up --build redis limiter-1 limiter-2 limiter-3
   redis-1-lease  same as redis-1, with -lease-size 10
   redis-3-lease  same as redis-3, with -lease-size 10
+  kind           Kind cluster with limiter Service (see deploy/k8s/README.md)
+  kind-lease     same as kind, with -lease-size 10
 EOF
 }
 
@@ -27,6 +29,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 LEASE_SIZE="0"
+WAIT_KIND="0"
 case "$TARGET" in
   memory|redis-1)
     ADDR="localhost:50051"
@@ -41,6 +44,15 @@ case "$TARGET" in
   redis-3-lease)
     ADDR="localhost:50051,localhost:50052,localhost:50053"
     LEASE_SIZE="10"
+    ;;
+  kind)
+    ADDR="localhost:50051"
+    WAIT_KIND="1"
+    ;;
+  kind-lease)
+    ADDR="localhost:50051"
+    LEASE_SIZE="10"
+    WAIT_KIND="1"
     ;;
   *)
     echo "run-scenarios: unknown target $TARGET" >&2
@@ -70,6 +82,50 @@ wait_for_addr() {
   echo "run-scenarios: timed out waiting for $addr" >&2
   return 1
 }
+
+PF_PID=""
+cleanup_port_forward() {
+  if [[ -n "$PF_PID" ]]; then
+    kill "$PF_PID" 2>/dev/null || true
+  fi
+}
+
+wait_for_kind() {
+  if ! command -v kubectl >/dev/null 2>&1; then
+    echo "run-scenarios: kubectl is required for target $TARGET" >&2
+    exit 1
+  fi
+  echo "waiting for deployment/limiter and statefulset/redis in namespace golimiter"
+  kubectl -n golimiter rollout status deployment/limiter --timeout=180s
+  kubectl -n golimiter rollout status statefulset/redis --timeout=180s
+  local i ready
+  for i in $(seq 1 60); do
+    ready="$(kubectl -n golimiter get endpoints limiter -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)"
+    if [[ -n "$ready" ]]; then
+      echo "limiter Service has ready endpoints: $ready"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "run-scenarios: timed out waiting for limiter Service endpoints" >&2
+  exit 1
+}
+
+ensure_kind_port_forward() {
+  if bash -c 'echo >/dev/tcp/127.0.0.1/50051' 2>/dev/null; then
+    echo "localhost:50051 already accepting connections"
+    return 0
+  fi
+  echo "starting kubectl port-forward svc/limiter 50051:50051"
+  kubectl -n golimiter port-forward svc/limiter 50051:50051 >/tmp/golimiter-kind-pf.log 2>&1 &
+  PF_PID=$!
+  trap cleanup_port_forward EXIT
+}
+
+if [[ "$WAIT_KIND" == "1" ]]; then
+  wait_for_kind
+  ensure_kind_port_forward
+fi
 
 IFS=',' read -r -a ADDRS <<<"$ADDR"
 for addr in "${ADDRS[@]}"; do
