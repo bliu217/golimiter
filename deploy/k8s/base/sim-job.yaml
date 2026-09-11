@@ -1,0 +1,31 @@
+# One-shot load test against the limiter Service (in-cluster DNS).
+# Re-run: kubectl -n golimiter delete job sim --ignore-not-found && kubectl apply -k <overlay>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sim
+  namespace: golimiter
+  labels:
+    app: sim
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: sim
+          image: golimiter/sim:dev
+          args:
+            - "-addr=limiter:50051"
+            - "-requests=100"
+            - "-concurrency=10"
+            - "-reset"
+            - "-output-dir=/tmp/golimiter-summaries"
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 64Mi

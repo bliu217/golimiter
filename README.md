@@ -24,11 +24,18 @@ Load test and expose metrics for the service
 Go - Simulator Client, gRPC Service  
 Docker - Multiple nodes  
 Redis - Shared state + atomic coordination across nodes  
+Kubernetes - Kind locally, EKS later (Deployment + Service in front of limiter replicas)  
 (TBD) React - Simple UI for simulator  
 (TBD) Prometheus/Grafana - Metrics + UI  
 
-## (TBD) Deployment
-EC2 → Docker Compose → Nginx/Traefik → 2-3 limiter containers + Redis
+## Deployment
+
+**Compose (laptop)** → **Kind (learn Kubernetes)** → **EKS (AWS)** → **Terraform** (VPC, EKS, ECR, later ElastiCache).
+
+- Compose stays the fast local loop: Redis + limiter containers, optional three-replica overlay.
+- Kind applies the same idea as Kubernetes objects: 3 limiter pods, 1 Redis StatefulSet, a **ClusterIP Service** as the first load balancer in front of the limiter Deployment. See [`deploy/k8s/README.md`](deploy/k8s/README.md).
+- EKS reuses those manifests via the `eks` overlay (ECR images, `gp3` disk, internal NLB for gRPC). Do not leave an EKS cluster running idle; the control plane is billed.
+- Terraform should create AWS infra later, not rewrite the Go service. In-cluster Redis is a single replica (not HA); ElastiCache is the managed next step.
 
 ## Distributed State (Redis)
 - Atomic Lua scripting (`EVAL` / `EVALSHA` / `SCRIPT LOAD`) keeps refill, limit check, and token decrement in one server-side transaction so concurrent nodes cannot oversubscribe a bucket.
@@ -90,7 +97,29 @@ Three limiter replicas sharing one Redis (used by the redis-3 scenarios below):
 docker compose -f docker-compose.yml -f docker-compose.multi.yml up --build redis limiter-1 limiter-2 limiter-3
 ```
 
-The replicas are published on `localhost:50051`, `localhost:50052`, and `localhost:50053`.
+The replicas are published on `localhost:50051`, `localhost:50052`, and `localhost:50053`. Compose does not load-balance those ports; pass a comma-separated `-addr` list to the simulator, or use Kubernetes (below) so a Service does it.
+
+## Kubernetes (Kind)
+
+Build images, load them into Kind, and apply the Kind overlay. Kind nodes cannot see laptop images until `kind load`.
+
+```sh
+kind create cluster --name golimiter
+docker build --target limiter -t golimiter/limiter:dev .
+docker build --target sim -t golimiter/sim:dev .
+kind load docker-image golimiter/limiter:dev --name golimiter
+kind load docker-image golimiter/sim:dev --name golimiter
+kubectl apply -k deploy/k8s/overlays/kind
+kubectl -n golimiter port-forward svc/limiter 50051:50051
+```
+
+Then run the simulator against the forwarded Service (one address; the Service spreads connections across ready limiter pods):
+
+```sh
+go run ./cmd/sim -addr localhost:50051 -requests 100 -concurrency 10 -reset
+```
+
+Object glossary, EKS overlay notes, and `kubectl` cheatsheet: [`deploy/k8s/README.md`](deploy/k8s/README.md).
 
 ## Local testing metrics
 

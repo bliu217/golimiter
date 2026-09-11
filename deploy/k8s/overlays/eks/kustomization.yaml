@@ -1,0 +1,25 @@
+# Replace the image registry with your ECR repository before applying on EKS.
+# Terraform can later set this via kustomize images[] or the kubernetes/helm provider.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+images:
+  - name: golimiter/limiter
+    newName: 111111111111.dkr.ecr.us-east-1.amazonaws.com/golimiter/limiter
+    newTag: latest
+  - name: golimiter/sim
+    newName: 111111111111.dkr.ecr.us-east-1.amazonaws.com/golimiter/sim
+    newTag: latest
+
+patches:
+  - path: limiter-service-nlb.yaml
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: redis
+      namespace: golimiter
+    path: redis-storage.yaml

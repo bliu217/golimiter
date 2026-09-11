@@ -1,0 +1,11 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sim
+  namespace: golimiter
+spec:
+  template:
+    spec:
+      containers:
+        - name: sim
+          imagePullPolicy: Never

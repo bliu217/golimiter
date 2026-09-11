@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: limiter
+  namespace: golimiter
+  labels:
+    app: limiter
+spec:
+  type: ClusterIP
+  selector:
+    app: limiter
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc

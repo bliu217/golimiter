@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: limiter
+  namespace: golimiter
+  labels:
+    app: limiter
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: limiter
+  template:
+    metadata:
+      labels:
+        app: limiter
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: limiter
+          image: golimiter/limiter:dev
+          ports:
+            - name: grpc
+              containerPort: 50051
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          readinessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: limiter-config
